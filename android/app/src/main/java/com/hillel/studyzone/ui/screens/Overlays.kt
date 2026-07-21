@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -11,6 +12,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,15 +32,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
@@ -79,13 +85,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,6 +108,7 @@ import com.hillel.studyzone.model.AdminUser
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.UiState
 import com.hillel.studyzone.ui.components.GlassSurface
+import com.hillel.studyzone.ui.components.ChatRichText
 import com.hillel.studyzone.ui.components.LessonMathView
 import com.hillel.studyzone.ui.components.InteractiveLessonView
 import com.hillel.studyzone.ui.components.Pressable
@@ -106,14 +120,65 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun IntroSplash(visible: Boolean) {
-    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            var appeared by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { appeared = true }
-            val scale by animateFloatAsState(if (appeared) 1f else .72f, spring(dampingRatio = .58f), label = "intro")
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.alpha(scale)) {
-                Box(Modifier.size((84 * scale).dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(38.dp))
+    var internallyVisible by remember { mutableStateOf(visible) }
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(visible) {
+        internallyVisible = visible
+        if (visible) {
+            appeared = true
+            // Opening motion is decorative and never blocks an already-ready app for long.
+            delay(360)
+            internallyVisible = false
+        }
+    }
+    AnimatedVisibility(
+        visible = internallyVisible,
+        enter = fadeIn(),
+        exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(180))
+    ) {
+        val logoScale by animateFloatAsState(
+            targetValue = if (appeared) 1f else .68f,
+            animationSpec = spring(dampingRatio = .58f, stiffness = 430f),
+            label = "introLogo"
+        )
+        val contentAlpha by animateFloatAsState(
+            targetValue = if (appeared) 1f else 0f,
+            animationSpec = androidx.compose.animation.core.tween(180),
+            label = "introAlpha"
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.radialGradient(
+                    colors = listOf(StudyBlue.copy(alpha = .22f), Color.Black),
+                    radius = 720f
+                )
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .size(138.dp)
+                    .graphicsLayer { scaleX = logoScale; scaleY = logoScale; alpha = contentAlpha }
+                    .clip(CircleShape)
+                    .background(StudyBlue.copy(alpha = .08f))
+            )
+            Box(
+                Modifier
+                    .size(106.dp)
+                    .graphicsLayer { scaleX = logoScale; scaleY = logoScale; alpha = contentAlpha }
+                    .clip(CircleShape)
+                    .background(StudyBlue.copy(alpha = .14f))
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.graphicsLayer { alpha = contentAlpha }
+            ) {
+                Box(
+                    Modifier.size(78.dp).graphicsLayer { scaleX = logoScale; scaleY = logoScale }
+                        .clip(CircleShape).background(StudyBlue),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(36.dp))
                 }
                 Spacer(Modifier.height(18.dp))
                 Text("StudyZone", color = Color.White, style = MaterialTheme.typography.headlineLarge)
@@ -138,21 +203,43 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceAround) {
             tabs.forEach { item ->
                 val selected = active == item.first
+                val selectedFill by androidx.compose.animation.animateColorAsState(
+                    if (selected) StudyBlue.copy(.14f) else Color.Transparent,
+                    label = "navFill"
+                )
+                val iconScale by animateFloatAsState(
+                    if (selected) 1.08f else 1f,
+                    spring(stiffness = 760f, dampingRatio = .7f),
+                    label = "navIcon"
+                )
                 Column(
                     Modifier
                         .weight(1f)
+                        .heightIn(min = 58.dp)
                         .clip(RoundedCornerShape(22.dp))
-                        .background(if (selected) StudyBlue.copy(.14f) else Color.Transparent)
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .background(selectedFill)
+                        .selectable(
+                            selected = selected,
+                            onClick = { onTab(item.first) },
+                            role = Role.Tab
+                        )
+                        .padding(horizontal = 2.dp, vertical = 7.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    IconButton(onClick = { onTab(item.first) }, modifier = Modifier.size(28.dp)) {
-                        Icon(item.second, item.third, tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Icon(
+                        item.second,
+                        item.third,
+                        modifier = Modifier.size(23.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                        tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         item.third,
                         color = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelMedium
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -170,62 +257,151 @@ fun LessonScreen(
     onNext: () -> Unit
 ) {
     val lesson = state.lesson
-    var interactive by remember(lesson?.sectionId) { mutableStateOf(lesson?.content.isNullOrBlank()) }
+    var interactive by remember(lesson?.sectionId) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (state.lessonLoading || lesson == null) {
-            CircularProgressIndicator(Modifier.align(Alignment.Center))
+            LessonLoadingState()
         } else {
-            if (interactive) InteractiveLessonView(lesson.interactiveUrl, Modifier.fillMaxSize().statusBarsPadding())
-            else LessonMathView(lesson.content, Modifier.fillMaxSize().statusBarsPadding())
-            GlassSurface(
-                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(),
-                shape = RoundedCornerShape(26.dp)
-            ) {
-                Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "חזרה", onBack, size = 42.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(lesson.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${lesson.courseTitle} · ${lesson.sectionId}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Column(Modifier.fillMaxSize()) {
+                GlassSurface(
+                    Modifier.statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 6.dp).fillMaxWidth(),
+                    shape = RoundedCornerShape(26.dp)
+                ) {
+                    Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "חזרה", onBack, size = 42.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(lesson.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "${lesson.courseTitle} · ${lesson.sectionId}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        RoundActionButton(
+                            if ("${lesson.courseId}::${lesson.sectionId}" in state.bookmarkedSections) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                            "שמירה",
+                            onBookmark,
+                            size = 42.dp,
+                            active = "${lesson.courseId}::${lesson.sectionId}" in state.bookmarkedSections
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        RoundActionButton(
+                            Icons.Rounded.Public,
+                            if (interactive) "חזרה לשיעור Native" else "פתיחת גרסה אינטראקטיבית",
+                            { if (lesson.interactiveUrl.isNotBlank()) interactive = !interactive },
+                            size = 42.dp,
+                            active = interactive,
+                            enabled = lesson.interactiveUrl.isNotBlank()
+                        )
                     }
-                    RoundActionButton(
-                        if ("${lesson.courseId}::${lesson.sectionId}" in state.bookmarkedSections) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                        "שמירה",
-                        onBookmark,
-                        size = 42.dp,
-                        active = "${lesson.courseId}::${lesson.sectionId}" in state.bookmarkedSections
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    RoundActionButton(
-                        Icons.Rounded.Public,
-                        if (interactive) "מצב קריאה" else "גרסה אינטראקטיבית",
-                        { interactive = !interactive },
-                        size = 42.dp,
-                        active = interactive
-                    )
+                }
+
+                AnimatedContent(
+                    targetState = interactive,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    transitionSpec = {
+                        (fadeIn() + scaleIn(initialScale = .99f)) togetherWith
+                            (fadeOut() + scaleOut(targetScale = .99f))
+                    },
+                    label = "lessonMode"
+                ) { showInteractive ->
+                    if (showInteractive) {
+                        InteractiveLessonView(lesson.interactiveUrl, Modifier.fillMaxSize())
+                    } else if (lesson.content.isBlank()) {
+                        EmptyLessonContent(
+                            onInteractive = { if (lesson.interactiveUrl.isNotBlank()) interactive = true },
+                            interactiveAvailable = lesson.interactiveUrl.isNotBlank()
+                        )
+                    } else {
+                        LessonMathView(lesson.content, Modifier.fillMaxSize())
+                    }
+                }
+
+                GlassSurface(
+                    Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)
+                        .navigationBarsPadding().fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp)
+                ) {
+                    Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RoundActionButton(
+                            Icons.Rounded.KeyboardArrowRight,
+                            "השיעור הקודם",
+                            onPrevious,
+                            size = 44.dp,
+                            enabled = lesson.previousSectionId != null
+                        )
+                        Spacer(Modifier.weight(1f))
+                        val completed = "${lesson.courseId}/${lesson.chapterId}/${lesson.sectionId}" in state.completedSections
+                        Pressable(
+                            onClick = onCompleted,
+                            selected = completed,
+                            shape = CircleShape,
+                            contentPadding = 11.dp
+                        ) {
+                            Icon(Icons.Rounded.CheckCircle, null, tint = StudyBlue)
+                            Spacer(Modifier.width(7.dp))
+                            Text(if (completed) "הושלם" else "סיום שיעור", maxLines = 1)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        RoundActionButton(
+                            Icons.Rounded.KeyboardArrowLeft,
+                            "השיעור הבא",
+                            onNext,
+                            size = 44.dp,
+                            active = lesson.nextSectionId != null,
+                            enabled = lesson.nextSectionId != null
+                        )
+                    }
                 }
             }
+        }
+    }
+}
 
-            GlassSurface(
-                Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 10.dp).navigationBarsPadding().fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp)
-            ) {
-                Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RoundActionButton(Icons.Rounded.KeyboardArrowRight, "הקודם", onPrevious, size = 44.dp)
-                    Spacer(Modifier.weight(1f))
-                    Pressable(
-                        onClick = onCompleted,
-                        selected = "${lesson.courseId}/${lesson.chapterId}/${lesson.sectionId}" in state.completedSections,
-                        shape = CircleShape,
-                        contentPadding = 11.dp
-                    ) {
-                        Icon(Icons.Rounded.CheckCircle, null, tint = StudyBlue)
-                        Spacer(Modifier.width(7.dp))
-                        Text(if ("${lesson.courseId}/${lesson.chapterId}/${lesson.sectionId}" in state.completedSections) "הושלם" else "סיום שיעור")
-                    }
-                    Spacer(Modifier.weight(1f))
-                    RoundActionButton(Icons.Rounded.KeyboardArrowLeft, "הבא", onNext, size = 44.dp, active = lesson.nextSectionId != null)
-                }
+@Composable
+private fun LessonLoadingState() {
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(22.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(30.dp)) {
+            Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Box(Modifier.fillMaxWidth(.54f).height(26.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+                Box(Modifier.fillMaxWidth().height(15.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+                Box(Modifier.fillMaxWidth(.86f).height(15.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+                Spacer(Modifier.height(10.dp))
+                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally).size(28.dp), strokeWidth = 3.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyLessonContent(onInteractive: () -> Unit, interactiveAvailable: Boolean) {
+    Column(
+        Modifier.fillMaxSize().padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(Modifier.size(72.dp).clip(CircleShape).background(StudyBlue.copy(.13f)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.AutoAwesome, null, tint = StudyBlue, modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("התוכן עדיין מסתנכרן", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "לא נעביר אתכם לדפדפן. אפשר להמתין לסנכרון או לבחור במפורש בגרסה האינטראקטיבית.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(vertical = 10.dp)
+        )
+        if (interactiveAvailable) {
+            Pressable(onClick = onInteractive, selected = true) {
+                Icon(Icons.Rounded.Public, null, tint = StudyBlue)
+                Spacer(Modifier.width(8.dp))
+                Text("פתיחת גרסה אינטראקטיבית", color = StudyBlue, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -253,90 +429,127 @@ fun ChatOverlay(
         )
         return
     }
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(state.chatOpen) {
+        if (state.chatOpen) {
+            delay(90)
+            runCatching { focusRequester.requestFocus() }
+            keyboard?.show()
+        }
+    }
     AnimatedVisibility(
         visible = state.chatOpen,
         modifier = modifier,
-        enter = fadeIn() + scaleIn(initialScale = .82f),
-        exit = fadeOut() + scaleOut(targetScale = .82f)
+        enter = fadeIn() + scaleIn(initialScale = .9f) + slideInVertically(initialOffsetY = { it / 5 }),
+        exit = fadeOut() + scaleOut(targetScale = .94f) + slideOutVertically(targetOffsetY = { it / 6 })
     ) {
         GlassSurface(
             Modifier
+                .widthIn(max = 720.dp)
                 .fillMaxWidth()
-                .then(if (state.chatExpanded) Modifier.fillMaxSize().statusBarsPadding() else Modifier)
+                .then(
+                    if (state.chatExpanded) {
+                        Modifier.fillMaxSize().statusBarsPadding()
+                    } else {
+                        Modifier.heightIn(min = 230.dp, max = 520.dp)
+                    }
+                )
+                .navigationBarsPadding()
                 .imePadding()
-                .animateContentSize(spring(dampingRatio = .78f)),
-            shape = RoundedCornerShape(if (state.chatExpanded) 30.dp else 26.dp)
+                .animateContentSize(spring(dampingRatio = .86f, stiffness = 520f)),
+            shape = RoundedCornerShape(if (state.chatExpanded) 32.dp else 28.dp)
         ) {
-            Column(Modifier.padding(10.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(38.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(19.dp))
+            Column(Modifier.padding(12.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(42.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(21.dp))
                     }
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Pythi", fontWeight = FontWeight.ExtraBold)
-                        Text("עוזרת הלימוד שלך", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                        Text("Pythi", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (state.chatStreaming) "כותבת תשובה…" else "עוזרת הלימוד שלך",
+                            color = if (state.chatStreaming) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
-                    IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי") }
+                    if (state.chatMessages.isNotEmpty()) {
+                        IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי השיחה") }
+                    }
                     IconButton(onClick = { onExpanded(!state.chatExpanded) }) {
-                        Icon(if (state.chatExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess, "שינוי גודל")
+                        Icon(
+                            if (state.chatExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
+                            if (state.chatExpanded) "הקטנת הצ׳אט" else "הרחבת הצ׳אט"
+                        )
                     }
                     IconButton(onClick = { onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
                 }
-                AnimatedVisibility(state.chatExpanded || state.chatMessages.isNotEmpty()) {
-                    LazyColumn(
-                        modifier = if (state.chatExpanded) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().height(230.dp),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(9.dp)
+
+                if (state.chatMessages.isEmpty()) {
+                    Column(
+                        Modifier.fillMaxWidth().then(if (state.chatExpanded) Modifier.weight(1f) else Modifier)
+                            .padding(horizontal = 14.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        if (state.chatMessages.isEmpty()) {
-                            item {
-                                Text(
-                                    "אפשר לשאול על החומר, לבקש הסבר נוסף או תרגול.",
-                                    modifier = Modifier.fillMaxWidth().padding(22.dp),
-                                    textAlign = TextAlign.Center,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        Box(Modifier.size(58.dp).clip(CircleShape).background(StudyBlue.copy(.12f)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = StudyBlue, modifier = Modifier.size(26.dp))
                         }
-                        items(state.chatMessages, key = { it.id }) { message ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.role == "user") Arrangement.End else Arrangement.Start) {
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth(.88f)
-                                        .clip(RoundedCornerShape(22.dp))
-                                        .background(
-                                            when {
-                                                message.isError -> MaterialTheme.colorScheme.error.copy(.12f)
-                                                message.role == "user" -> StudyBlue
-                                                else -> MaterialTheme.colorScheme.surfaceVariant
-                                            }
-                                        )
-                                        .padding(14.dp)
-                                ) {
-                                    if (message.text.isBlank() && message.isStreaming) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                                    else Text(message.text, color = if (message.role == "user") Color.White else MaterialTheme.colorScheme.onSurface)
-                                }
+                        Spacer(Modifier.height(12.dp))
+                        Text("מה לומדים היום?", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "אפשר לבקש הסבר, תרגול או פתרון מסודר עם נוסחאות.",
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            items(listOf("הסבר פשוט", "תרגיל לדוגמה", "סיכום קצר")) { suggestion ->
+                                Pressable(
+                                    onClick = { onInput(suggestion) },
+                                    shape = CircleShape,
+                                    contentPadding = 9.dp
+                                ) { Text(suggestion, style = MaterialTheme.typography.labelMedium) }
                             }
                         }
                     }
+                } else {
+                    ChatRichText(
+                        messages = state.chatMessages,
+                        modifier = if (state.chatExpanded) {
+                            Modifier.fillMaxWidth().weight(1f)
+                        } else {
+                            Modifier.fillMaxWidth().height(270.dp)
+                        }
+                    )
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.Bottom) {
                     OutlinedTextField(
                         value = state.chatInput,
                         onValueChange = onInput,
-                        modifier = Modifier.weight(1f).animateContentSize(),
+                        modifier = Modifier.weight(1f).focusRequester(focusRequester),
                         placeholder = { Text("שאלו את Pythi…") },
                         shape = RoundedCornerShape(24.dp),
-                        maxLines = if (state.chatExpanded) 5 else 2
+                        minLines = 1,
+                        maxLines = if (state.chatExpanded) 6 else 3,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(
+                            onSend = {
+                                if (!state.chatStreaming && state.chatInput.isNotBlank()) onSend()
+                            }
+                        )
                     )
                     Spacer(Modifier.width(8.dp))
                     RoundActionButton(
                         icon = if (state.chatStreaming) Icons.Rounded.Stop else Icons.Rounded.Send,
                         contentDescription = if (state.chatStreaming) "עצירה" else "שליחה",
                         onClick = if (state.chatStreaming) onStop else onSend,
-                        active = true,
-                        size = 52.dp
+                        active = state.chatStreaming || state.chatInput.isNotBlank(),
+                        size = 52.dp,
+                        enabled = state.chatStreaming || state.chatInput.isNotBlank()
                     )
                 }
             }
@@ -353,13 +566,17 @@ fun AuthOverlay(
     onRegister: (String, String, String) -> Unit
 ) {
     AnimatedVisibility(visible, enter = fadeIn() + scaleIn(initialScale = .9f), exit = fadeOut() + scaleOut(targetScale = .9f)) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(.64f)).statusBarsPadding().padding(18.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black.copy(.64f))
+                .statusBarsPadding().navigationBarsPadding().imePadding().padding(18.dp),
+            contentAlignment = Alignment.Center
+        ) {
             var register by remember { mutableStateOf(false) }
             var name by remember { mutableStateOf("") }
             var email by remember { mutableStateOf("") }
             var password by remember { mutableStateOf("") }
             var showPassword by remember { mutableStateOf(false) }
-            GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp)) {
+            GlassSurface(Modifier.fillMaxWidth().widthIn(max = 620.dp).heightIn(max = 720.dp), shape = RoundedCornerShape(32.dp)) {
                 Column(Modifier.padding(22.dp).verticalScroll(rememberScrollState())) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(50.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
@@ -424,7 +641,13 @@ fun AdminScreen(
 ) {
     var tab by remember { mutableStateOf("overview") }
     val tabs = listOf("overview" to "סקירה", "users" to "משתמשים", "requests" to "בקשות", "courses" to "קורסים", "settings" to "מערכת")
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "סגירה", onClose, size = 46.dp)
             Spacer(Modifier.width(12.dp))
@@ -541,7 +764,9 @@ private fun AdminCoursesContent(state: UiState, onToggle: (String) -> Unit) {
                 Icon(if (course.id in state.publicCourseIds) Icons.Rounded.Public else Icons.Rounded.Lock, null, tint = if (course.id in state.publicCourseIds) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.width(12.dp))
                 Text(course.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                Switch(checked = course.id in state.publicCourseIds, onCheckedChange = { onToggle(course.id) })
+                // The whole row is the control. A nested click handler here can
+                // dispatch the toggle twice on some Compose gesture paths.
+                Switch(checked = course.id in state.publicCourseIds, onCheckedChange = null)
             }
         }
     }

@@ -14,44 +14,103 @@ concurrency:
 
 jobs:
   build-apk:
-    name: Assemble debug APK
+    name: Assemble optimized APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Gradle 9.5
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.5.0'
           cache-read-only: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+
+      - name: Preserve preview signing identity
+        uses: actions/cache@v6
+        with:
+          path: ~/.android/debug.keystore
+          key: studyzone-android-preview-signing-v1
 
       - name: Install Android platform
         shell: bash
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
 
-      - name: Assemble APK
+      - name: Validate bundled native content
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          assets = Path('android/app/src/main/assets')
+          catalog = json.loads((assets / 'search-index/catalog.json').read_text(encoding='utf-8'))
+          courses = catalog.get('courses', [])
+          sections = sum(len(chapter.get('sections', [])) for course in courses for chapter in course.get('chapters', []))
+          assert len(courses) >= 28, f'Expected at least 28 courses, got {len(courses)}'
+          assert sections >= 779, f'Expected at least 779 sections, got {sections}'
+          aliases = {'history-bagrut': 'history', 'lashon-bagrut': 'lashon'}
+          resolved = 0
+          lesson_texts = []
+          for course in courses:
+              index_name = aliases.get(course['id'], course['id'])
+              index = json.loads((assets / f'search-index/{index_name}.json').read_text(encoding='utf-8'))
+              lesson_texts.extend(
+                  value if isinstance(value, str) else value.get('content', value.get('text', ''))
+                  for chapter_content in index.values()
+                  for value in chapter_content.values()
+              )
+              for chapter in course.get('chapters', []):
+                  chapter_content = index.get(chapter['id'], {})
+                  for section in chapter.get('sections', []):
+                      candidate = section['id']
+                      while candidate and not chapter_content.get(candidate):
+                          candidate = candidate.rsplit('.', 1)[0] if '.' in candidate else ''
+                      assert candidate or chapter_content.get(chapter['id']), \
+                          f"Missing native lesson source: {course['id']}/{chapter['id']}/{section['id']}"
+                      resolved += 1
+          assert resolved == sections, f'Resolved {resolved} of {sections} sections'
+          joined_lessons = '\n'.join(lesson_texts)
+          interactive_shells = ('<FullPageQuiz', '<Quiz ', '<MiniChoice', '<QuickChoice', '<InteractiveInput', '<NumberInputCheck')
+          assert not any(shell in joined_lessons for shell in interactive_shells), 'Unexpanded native quiz shell found'
+          assert joined_lessons.count('**תשובה נכונה:**') >= 919, 'Native question answers are incomplete'
+          assert joined_lessons.count('**הסבר:**') >= 917, 'Native question explanations are incomplete'
+          assert joined_lessons.count('**תשובה:**') >= 48, 'Dapar answer set is incomplete'
+          assert (assets / 'katex/katex.min.js').stat().st_size > 200_000, 'Offline KaTeX bundle is missing'
+          assert (assets / 'katex/LICENSE').is_file(), 'KaTeX license notice is missing'
+          print(f'Validated {len(courses)} courses and {resolved} native lesson routes')
+          PY
+
+      - name: Assemble optimized APK
         working-directory: android
         env:
           STUDYZONE_API_URL: https://studyzone-cpav.onrender.com
           STUDYZONE_WEB_URL: https://studyzone-1-yhnz.onrender.com
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Prepare installable APK
+        shell: bash
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk StudyZone.apk
+          sha256sum StudyZone.apk > StudyZone.apk.sha256
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: studyzone-${{ github.sha }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            StudyZone.apk
+            StudyZone.apk.sha256
           if-no-files-found: error
           retention-days: 14

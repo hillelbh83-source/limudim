@@ -21,14 +21,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,10 +34,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.unit.LayoutDirection.Rtl
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,24 +56,49 @@ import com.hillel.studyzone.ui.screens.ProfileScreen
 import com.hillel.studyzone.ui.screens.SavedScreen
 import com.hillel.studyzone.ui.screens.SearchScreen
 import com.hillel.studyzone.ui.screens.ToolsScreen
+import com.hillel.studyzone.ui.components.LocalHapticsEnabled
 import com.hillel.studyzone.ui.theme.StudyZoneTheme
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
+    private var activeIntent by mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen().setKeepOnScreenCondition { viewModel.state.value.isBootstrapping }
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        activeIntent = intent
         enableEdgeToEdge()
+        // The system splash only bridges process startup to the first Compose frame. It never
+        // waits for the server, and exits into the in-app reveal with a short GPU-only animation.
+        splash.setOnExitAnimationListener { provider ->
+            provider.view.animate()
+                .alpha(0f)
+                .scaleX(1.035f)
+                .scaleY(1.035f)
+                .setDuration(170L)
+                .withEndAction { provider.remove() }
+                .start()
+        }
         setContent {
-            val state by viewModel.state.collectAsStateWithLifecycle()
-            StudyZoneTheme(state.settings.themeMode, state.settings.fontScale) {
-                CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides Rtl) {
-                    StudyZoneRoot(viewModel, intent)
+            // Theme settings are isolated from high-frequency UI state (notably chat streaming),
+            // so the entire theme tree is not invalidated for every server chunk.
+            val settings by viewModel.settings.collectAsStateWithLifecycle()
+            StudyZoneTheme(settings.themeMode, settings.fontScale) {
+                CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalLayoutDirection provides Rtl,
+                    LocalHapticsEnabled provides settings.haptics
+                ) {
+                    StudyZoneRoot(viewModel, activeIntent)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        activeIntent = intent
     }
 }
 
@@ -83,7 +106,8 @@ class MainActivity : ComponentActivity() {
 private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var introVisible by remember { mutableStateOf(true) }
+    var introVisible by rememberSaveable { mutableStateOf(true) }
+    var handledDeepLink by rememberSaveable { mutableStateOf<String?>(null) }
     var pdfUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -94,11 +118,12 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
         }
     }
 
-    LaunchedEffect(state.isBootstrapping) {
-        if (!state.isBootstrapping) {
-            delay(if (state.settings.reduceMotion) 120 else 720)
-            introVisible = false
-        }
+    LaunchedEffect(Unit) {
+        // Let real content draw underneath first, then play a brief branded hand-off. Network and
+        // DataStore work continue independently and can never prolong this animation.
+        withFrameNanos { }
+        delay(if (viewModel.settings.value.reduceMotion) 80 else 360)
+        introVisible = false
     }
 
     LaunchedEffect(state.toast) {
@@ -109,10 +134,14 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
     }
 
     LaunchedEffect(state.courses, launchIntent?.dataString) {
+        val deepLink = launchIntent?.dataString ?: return@LaunchedEffect
+        if (handledDeepLink == deepLink) return@LaunchedEffect
         val uri = launchIntent?.data ?: return@LaunchedEffect
         if (state.courses.isEmpty()) return@LaunchedEffect
         val courseId = uri.host ?: uri.pathSegments.firstOrNull()
         val sectionId = if (uri.host != null) uri.pathSegments.firstOrNull() else uri.pathSegments.getOrNull(1)
+        if (state.courses.none { it.id == courseId }) return@LaunchedEffect
+        handledDeepLink = deepLink
         viewModel.handleDeepLink(courseId, sectionId)
     }
 
@@ -120,18 +149,29 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
         val activity = context as? ComponentActivity
         if (state.settings.keepScreenOn) activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { }
+        onDispose {
+            if (state.settings.keepScreenOn) {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
     }
 
     val selectedCourse = state.selectedCourse
 
-    BackHandler(enabled = state.adminOpen) { viewModel.closeAdmin() }
-    BackHandler(enabled = pdfUri != null) { pdfUri = null }
-    BackHandler(enabled = state.chatExpanded) { viewModel.setChatExpanded(false) }
-    BackHandler(enabled = state.chatOpen && !state.chatExpanded) { viewModel.setChatOpen(false) }
-    BackHandler(enabled = state.authOpen) { viewModel.setAuthOpen(false) }
-    BackHandler(enabled = state.lesson != null) { viewModel.closeLesson() }
-    BackHandler(enabled = state.selectedCourse != null && state.lesson == null) { viewModel.closeCourse() }
+    val hasBackDestination = introVisible || pdfUri != null || state.adminOpen || state.authOpen ||
+        state.chatOpen || state.lesson != null || state.lessonLoading || state.selectedCourse != null
+    BackHandler(enabled = hasBackDestination) {
+        when {
+            introVisible -> introVisible = false
+            pdfUri != null -> pdfUri = null
+            state.adminOpen -> viewModel.closeAdmin()
+            state.authOpen -> viewModel.setAuthOpen(false)
+            state.chatExpanded -> viewModel.setChatExpanded(false)
+            state.chatOpen -> viewModel.setChatOpen(false)
+            state.lesson != null || state.lessonLoading -> viewModel.closeLesson()
+            state.selectedCourse != null -> viewModel.closeCourse()
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
@@ -178,7 +218,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
             }
         }
 
-        if (state.lesson == null && !state.lessonLoading && !state.adminOpen && pdfUri == null) {
+        if (state.lesson == null && !state.lessonLoading && !state.adminOpen && pdfUri == null && !state.chatOpen) {
             BottomGlassNav(
                 active = state.rootTab,
                 onTab = viewModel::selectTab,
@@ -198,7 +238,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
                 modifier = if (state.chatExpanded) {
                     Modifier.align(Alignment.Center).padding(8.dp)
                 } else if (state.chatOpen) {
-                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 10.dp, end = 10.dp, bottom = if (state.lesson == null) 96.dp else 82.dp)
+                    Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp)
                 } else {
                     Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp)
                 }

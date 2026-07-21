@@ -1,6 +1,7 @@
 package com.hillel.studyzone.data
 
 import android.content.Context
+import android.net.Uri
 import com.hillel.studyzone.BuildConfig
 import com.hillel.studyzone.model.AccessRequest
 import com.hillel.studyzone.model.AdminOverview
@@ -12,11 +13,12 @@ import com.hillel.studyzone.model.SearchResult
 import com.hillel.studyzone.model.Section
 import com.hillel.studyzone.model.User
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Cookie
 import okhttp3.CookieJar
-import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -25,22 +27,57 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
-class ApiException(message: String, val status: Int = 0) : Exception(message)
+class ApiException(message: String, val status: Int = 0, val kind: String? = null) : Exception(message)
 
 class StudyZoneApi(context: Context) {
-    private val apiRoot = BuildConfig.API_BASE_URL.trimEnd('/') + "/api"
+    private val appContext = context.applicationContext
+    private val apiBase = BuildConfig.API_BASE_URL.trimEnd('/')
+    private val apiRoot = "$apiBase/api"
+    private val webRoot = BuildConfig.WEB_BASE_URL.trimEnd('/')
+    private val cookieJar = PersistentCookieJar(appContext, "$apiRoot/".toHttpUrl())
     private val client = OkHttpClient.Builder()
-        .cookieJar(PersistentCookieJar(context, "$apiRoot/".toHttpUrl()))
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(75, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .cookieJar(cookieJar)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(28, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
+    private val chatClient = client.newBuilder()
+        .readTimeout(120, TimeUnit.SECONDS)
+        .callTimeout(150, TimeUnit.SECONDS)
+        .build()
+    private val content = NativeContentRepository(appContext, client, webRoot)
+    private val accountCache = appContext.getSharedPreferences(ACCOUNT_CACHE, Context.MODE_PRIVATE)
+    private val avatarDirectory = File(appContext.cacheDir, "profile-images").apply { mkdirs() }
     private val jsonType = "application/json; charset=utf-8".toMediaType()
+    private val authGeneration = AtomicLong(0L)
 
-    data class Bootstrap(val courses: List<Course>, val user: User?, val completedSections: Set<String>)
+    /** Local, non-blocking startup payload. Call [refreshBootstrap] after the first frame. */
+    data class Bootstrap(
+        val courses: List<Course>,
+        val user: User?,
+        val completedSections: Set<String>,
+        val bookmarkedSections: Set<String> = emptySet()
+    )
+
+    data class AccountSnapshot(
+        val user: User?,
+        val completedSections: Set<String>,
+        val bookmarkedSections: Set<String>
+    )
+
+    data class LoginResult(
+        val user: User,
+        val completedSections: Set<String>,
+        val bookmarkedSections: Set<String>
+    )
+
     data class AdminData(
         val overview: AdminOverview,
         val users: List<AdminUser>,
@@ -48,43 +85,90 @@ class StudyZoneApi(context: Context) {
         val publicCourseIds: Set<String>
     )
 
+    /**
+     * Returns entirely from APK assets and the last sanitized account snapshot.
+     * No Render/network cold start is allowed to hold the splash screen hostage.
+     */
     suspend fun bootstrap(): Bootstrap = withContext(Dispatchers.IO) {
-        val body = runCatching { requestJson("/mobile/bootstrap") }.getOrNull()
-        if (body == null) {
-            val user = runCatching { requestJson("/auth/me").optJSONObject("user")?.toUser() }.getOrNull()
-            return@withContext Bootstrap(FallbackCatalog.courses, user, emptySet())
-        }
-        val user = body.optJSONObject("user")?.toUser()
-        val completed = if (user != null) {
-            runCatching {
-                postJson("/user/data", JSONObject())
-                    .optJSONObject("data")
-                    ?.optJSONArray("completedSections")
-                    .toStringSet()
-            }.getOrDefault(emptySet())
-        } else emptySet()
-        Bootstrap(body.optJSONArray("courses").toCourses(), user, completed)
+        val cached = readCachedAccount()
+        Bootstrap(
+            courses = content.bundledCourses,
+            user = cached.user,
+            completedSections = cached.completedSections,
+            bookmarkedSections = cached.bookmarkedSections
+        )
+    }
+
+    /** Revalidates the cookie and merges the real profile/progress from the server. */
+    suspend fun refreshBootstrap(): Bootstrap = withContext(Dispatchers.IO) {
+        val account = refreshAccountInternal(null)
+        // The current production deployment returns 404 here. Running this only
+        // after auth revalidation keeps it off the launch path while allowing a
+        // newer server to replace bundled metadata without an app update.
+        val serverCourses = runCatching {
+            requestJson("/mobile/bootstrap").optJSONArray("courses").toCourses()
+        }.getOrDefault(emptyList())
+        Bootstrap(
+            courses = serverCourses.ifEmpty { content.bundledCourses },
+            user = account.user,
+            completedSections = account.completedSections,
+            bookmarkedSections = account.bookmarkedSections
+        )
+    }
+
+    suspend fun refreshAccount(): AccountSnapshot = withContext(Dispatchers.IO) {
+        refreshAccountInternal(null)
     }
 
     suspend fun lesson(courseId: String, sectionId: String): Lesson = withContext(Dispatchers.IO) {
+        // The bundled index is the primary source: instant, native and offline.
+        content.lesson(courseId, sectionId)?.let { return@withContext it }
+
+        // Forward compatibility for a server deployment that includes /api/mobile.
         val path = "/mobile/courses/${encode(courseId)}/sections/${encode(sectionId)}"
-        runCatching { requestJson(path).getJSONObject("lesson").toLesson() }
-            .getOrElse { FallbackCatalog.lesson(courseId, sectionId) ?: throw it }
+        runCatching { requestJson(path).optJSONObject("lesson")?.toLesson() }
+            .getOrNull()
+            ?.takeIf { it.content.isNotBlank() }
+            ?: FallbackCatalog.lesson(courseId, sectionId)
+            ?: throw ApiException("השיעור לא נמצא", 404)
+    }
+
+    suspend fun refreshCourseContent(courseId: String): Boolean = withContext(Dispatchers.IO) {
+        content.refreshCourseIndex(courseId)
     }
 
     suspend fun search(query: String): List<SearchResult> = withContext(Dispatchers.IO) {
-        runCatching {
-            requestJson("/mobile/search?q=${encode(query)}")
-                .optJSONArray("results")
-                .toSearchResults()
-        }.getOrElse { FallbackCatalog.search(query) }
+        content.search(query)
     }
 
-    suspend fun login(email: String, password: String): User = withContext(Dispatchers.IO) {
-        postJson(
+    suspend fun login(email: String, password: String): LoginResult = withContext(Dispatchers.IO) {
+        val generation = authGeneration.incrementAndGet()
+        val loginBody = postJson(
             "/auth/login",
             JSONObject().put("email", email).put("password", password).put("isGoogle", false)
-        ).toLoginUser()
+        )
+        val loginUser = loginBody.toUser(apiBase)
+        val loginData = loginBody.optJSONObject("data")
+
+        // The current login response already contains the complete public profile
+        // and account data. Avoid repeating /auth/me on the critical login path.
+        val user = coroutineScope {
+            val admin = async {
+                runCatching { requestJson("/admin/access").optBoolean("isAdmin") }.getOrDefault(false)
+            }
+            val profile = async { cacheProfilePhoto(loginUser) }
+            profile.await().copy(isAdmin = admin.await() || loginUser.isAdmin)
+        }
+
+        val local = readCachedAccount()
+        val remote = loginData.toAccountSnapshot(user)
+        val sameCachedAccount = local.user?.sameIdentityAs(user) == true
+        val snapshot = remote.copy(
+            completedSections = if (sameCachedAccount) local.completedSections + remote.completedSections else remote.completedSections,
+            bookmarkedSections = if (sameCachedAccount) local.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections
+        )
+        if (generation == authGeneration.get()) cacheAccount(snapshot)
+        LoginResult(user, snapshot.completedSections, snapshot.bookmarkedSections)
     }
 
     suspend fun register(email: String, password: String, displayName: String): String = withContext(Dispatchers.IO) {
@@ -92,43 +176,76 @@ class StudyZoneApi(context: Context) {
             "/auth/register",
             JSONObject().put("email", email).put("password", password).put("displayName", displayName)
         )
-        response.optString("message", "נשלח קישור אימות לאימייל")
+        val message = response.optString("message")
+        if (message.contains("verification", ignoreCase = true)) {
+            "נשלח קישור אימות לאימייל"
+        } else {
+            message.ifBlank { "נשלח קישור אימות לאימייל" }
+        }
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {
-        postJson("/auth/logout", JSONObject(), mapOf("X-Requested-With" to "XMLHttpRequest"))
+        authGeneration.incrementAndGet()
+        val logoutUrl = (apiRoot + "/auth/logout").toHttpUrl()
+        val cookieHeader = cookieJar.loadForRequest(logoutUrl)
+            .joinToString("; ") { "${it.name}=${it.value}" }
+        // Local logout is immediate even when Render is asleep or the device is offline.
+        cookieJar.clear()
+        clearCachedAccount()
+        runCatching {
+            val request = baseRequest(logoutUrl.toString())
+                .header("X-Requested-With", "XMLHttpRequest")
+                .apply { if (cookieHeader.isNotBlank()) header("Cookie", cookieHeader) }
+                .post(JSONObject().toString().toRequestBody(jsonType))
+                .build()
+            executeJson(request)
+        }
         Unit
     }
 
     suspend fun requestCourseAccess(courseId: String) = withContext(Dispatchers.IO) {
-        postJson("/user/course-access/request", JSONObject().put("courseId", courseId))
+        val title = content.bundledCourses.firstOrNull { it.id == courseId }?.title.orEmpty()
+        postJson(
+            "/user/course-access/request",
+            JSONObject().put("courseId", courseId).put("courseTitle", title)
+        )
         Unit
     }
 
-    suspend fun syncProgress(completed: Set<String>) = withContext(Dispatchers.IO) {
-        postJson(
-            "/user/sync",
-            JSONObject().put(
-                "data",
-                JSONObject()
-                    .put("completedSections", JSONArray(completed.toList()))
+    suspend fun syncProgress(completed: Set<String>) = syncUserData(completed, null)
+
+    /**
+     * Syncs progress. Native lesson bookmarks remain local because the current
+     * server has no dedicated field for them; savedItems and Pythi bookmarks
+     * have different meanings and must not be overwritten.
+     */
+    suspend fun syncUserData(completed: Set<String>, bookmarks: Set<String>?) = withContext(Dispatchers.IO) {
+        val data = JSONObject().put("completedSections", JSONArray(completed.sorted()))
+        postJson("/user/sync", JSONObject().put("data", data))
+
+        val cached = readCachedAccount()
+        cacheAccount(
+            cached.copy(
+                completedSections = completed,
+                bookmarkedSections = bookmarks ?: cached.bookmarkedSections
             )
         )
-        Unit
     }
 
     suspend fun loadAdmin(): AdminData = withContext(Dispatchers.IO) {
-        val overviewBody = requestJson("/admin/overview")
-        val overview = (overviewBody.optJSONObject("summary") ?: overviewBody).toAdminOverview()
-        val usersBody = requestJson("/admin/users?page=1&limit=100")
-        val requestsBody = requestJson("/admin/course-access?status=pending")
-        val publicBody = requestJson("/admin/courses/public")
-        AdminData(
-            overview = overview,
-            users = usersBody.optJSONArray("users").toAdminUsers(),
-            requests = requestsBody.optJSONArray("requests").toAccessRequests(),
-            publicCourseIds = publicBody.optJSONArray("publicCourseIds").toStringSet()
-        )
+        coroutineScope {
+            val overview = async { requestJson("/admin/overview") }
+            val users = async { requestJson("/admin/users?page=1&limit=200") }
+            val requests = async { requestJson("/admin/course-access?status=pending&page=1&limit=300") }
+            val publicCourses = async { requestJson("/admin/courses/public") }
+            val overviewBody = overview.await()
+            AdminData(
+                overview = (overviewBody.optJSONObject("summary") ?: overviewBody).toAdminOverview(),
+                users = users.await().optJSONArray("users").toAdminUsers(apiBase),
+                requests = requests.await().optJSONArray("requests").toAccessRequests(),
+                publicCourseIds = publicCourses.await().optJSONArray("publicCourseIds").toStringSet()
+            )
+        }
     }
 
     suspend fun toggleUserBlock(userId: String): Boolean = withContext(Dispatchers.IO) {
@@ -169,9 +286,13 @@ class StudyZoneApi(context: Context) {
         onError: (Throwable) -> Unit
     ): Call {
         val contents = JSONArray().apply {
-            messages.takeLast(18).forEach { (role, text) ->
-                put(JSONObject().put("role", role).put("parts", JSONArray().put(JSONObject().put("text", text))))
-            }
+            messages
+                .filter { it.second.isNotBlank() }
+                .takeLast(18)
+                .forEach { (rawRole, text) ->
+                    val role = if (rawRole == "assistant") "model" else rawRole
+                    put(JSONObject().put("role", role).put("parts", JSONArray().put(JSONObject().put("text", text))))
+                }
         }
         val payload = JSONObject()
             .put("contents", contents)
@@ -196,41 +317,63 @@ class StudyZoneApi(context: Context) {
             )
         }
 
-        val request = Request.Builder()
-            .url(apiRoot + "/gemini/stream")
+        val request = baseRequest(apiRoot + "/gemini/stream")
+            .header("Accept", "application/x-ndjson, application/json")
             .post(payload.toString().toRequestBody(jsonType))
             .build()
-        val call = client.newCall(request)
+        val call = chatClient.newCall(request)
+        val terminal = AtomicBoolean(false)
         call.enqueue(object : okhttp3.Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) = onError(e)
+            override fun onFailure(call: Call, error: java.io.IOException) {
+                if (terminal.compareAndSet(false, true)) onError(error)
+            }
 
             override fun onResponse(call: Call, response: okhttp3.Response) {
                 response.use {
                     if (!it.isSuccessful) {
-                        val message = runCatching { JSONObject(it.body?.string().orEmpty()).optString("error") }
-                            .getOrDefault("")
-                            .ifBlank { "שגיאת שרת (${it.code})" }
-                        onError(ApiException(message, it.code))
+                        val raw = it.body?.string().orEmpty()
+                        val error = apiError(raw, it.code)
+                        if (terminal.compareAndSet(false, true)) onError(error)
                         return
                     }
-                    var fullText = ""
                     try {
                         val source = it.body?.source() ?: throw ApiException("השרת החזיר תשובה ריקה")
+                        var fullText = ""
+                        var receivedFinal = false
                         while (!source.exhausted()) {
-                            val line = source.readUtf8Line()?.trim().orEmpty()
-                            if (line.isBlank()) continue
-                            val event = JSONObject(line)
+                            val rawLine = source.readUtf8Line() ?: break
+                            val line = rawLine.trim().removePrefix("data:").trim()
+                            if (line.isBlank() || line == "[DONE]") continue
+                            val event = runCatching { JSONObject(line) }.getOrNull() ?: continue
                             when (event.optString("type")) {
-                                "chunk" -> {
-                                    fullText += event.optString("delta")
-                                    onDelta(fullText)
+                                "chunk", "delta" -> {
+                                    val delta = event.optString("delta").ifBlank { event.optString("text") }
+                                    if (delta.isNotEmpty()) {
+                                        fullText += delta
+                                        onDelta(fullText)
+                                    }
                                 }
-                                "error" -> throw ApiException(event.optString("error", "הצ׳אט אינו זמין כרגע"))
+                                "final", "done" -> {
+                                    val finalText = event.optString("text")
+                                    if (fullText.isBlank() && finalText.isNotBlank()) {
+                                        fullText = finalText
+                                        onDelta(fullText)
+                                    }
+                                    receivedFinal = true
+                                }
+                                "error" -> throw ApiException(
+                                    event.optString("error").ifBlank { "הצ׳אט אינו זמין כרגע" },
+                                    kind = event.optString("kind").takeIf(String::isNotBlank)
+                                )
                             }
                         }
-                        onDone()
+                        if (fullText.isBlank()) {
+                            val suffix = if (receivedFinal) "" else " (החיבור נסגר לפני אירוע הסיום)"
+                            throw ApiException("לא התקבלה תשובה מ־Pythi$suffix")
+                        }
+                        if (terminal.compareAndSet(false, true)) onDone()
                     } catch (error: Throwable) {
-                        onError(error)
+                        if (terminal.compareAndSet(false, true)) onError(error)
                     }
                 }
             }
@@ -238,29 +381,202 @@ class StudyZoneApi(context: Context) {
         return call
     }
 
+    private suspend fun refreshAccountInternal(seedUser: JSONObject?): AccountSnapshot {
+        val generation = authGeneration.get()
+        val meBody = runCatching { requestJson("/auth/me") }.getOrElse { error ->
+            if (error is ApiException && error.status == 401) {
+                if (generation == authGeneration.get()) clearCachedAccount()
+                return AccountSnapshot(null, emptySet(), emptySet())
+            }
+            return readCachedAccount()
+        }
+        val meObject = meBody.optJSONObject("user") ?: seedUser
+            ?: return AccountSnapshot(null, emptySet(), emptySet())
+        var user = meObject.toUser(apiBase)
+
+        val userDataBody = runCatching { postJson("/user/data", JSONObject()) }.getOrNull()
+        if (userDataBody != null) {
+            val refreshedPhoto = absoluteUrl(userDataBody.optString("photoURL")).takeIf { it.isNotBlank() }
+            user = user.copy(
+                displayName = userDataBody.optString("displayName").ifBlank { user.displayName },
+                photoUrl = refreshedPhoto ?: user.photoUrl
+            )
+        }
+        val profileUser = user
+        user = coroutineScope {
+            val admin = async {
+                runCatching { requestJson("/admin/access").optBoolean("isAdmin") }.getOrDefault(false)
+            }
+            val profile = async { cacheProfilePhoto(profileUser) }
+            profile.await().copy(isAdmin = admin.await() || profileUser.isAdmin)
+        }
+
+        val data = userDataBody?.optJSONObject("data") ?: meObject.optJSONObject("data")
+        val cached = readCachedAccount()
+        val remote = data.toAccountSnapshot(user)
+        val sameCachedAccount = cached.user?.sameIdentityAs(user) == true
+        return remote.copy(
+            completedSections = if (sameCachedAccount) cached.completedSections + remote.completedSections else remote.completedSections,
+            bookmarkedSections = if (sameCachedAccount) cached.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections
+        ).also { snapshot ->
+            if (generation == authGeneration.get()) cacheAccount(snapshot)
+        }
+    }
+
+    private fun cacheProfilePhoto(user: User): User {
+        val remoteUrl = user.photoUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return user
+        val identity = user.userId.ifBlank { user.email.lowercase() }
+        val safeId = identity.hashCode().toUInt().toString(16)
+        val version = remoteUrl.hashCode().toUInt().toString(16)
+        val filePrefix = "$safeId-$version."
+        avatarDirectory.listFiles()
+            ?.firstOrNull { it.isFile && it.length() > 0L && it.name.startsWith(filePrefix) }
+            ?.let { return user.copy(photoUrl = Uri.fromFile(it).toString()) }
+        return runCatching {
+            val request = baseRequest(remoteUrl).header("Accept", "image/*").get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use user
+                val body = response.body ?: return@use user
+                val declaredLength = body.contentLength()
+                if (declaredLength > MAX_AVATAR_BYTES) return@use user.copy(photoUrl = null)
+                val bytes = body.bytes()
+                if (bytes.isEmpty() || bytes.size.toLong() > MAX_AVATAR_BYTES) return@use user.copy(photoUrl = null)
+                val contentType = response.header("Content-Type").orEmpty().lowercase()
+                if (!contentType.startsWith("image/")) return@use user.copy(photoUrl = null)
+                val extension = when {
+                    "png" in contentType -> "png"
+                    "webp" in contentType -> "webp"
+                    "gif" in contentType -> "gif"
+                    else -> "jpg"
+                }
+                avatarDirectory.listFiles()?.filter { it.name.startsWith("$safeId.") }?.forEach { it.delete() }
+                avatarDirectory.listFiles()?.filter { it.name.startsWith("$safeId-") }?.forEach { it.delete() }
+                val target = File(avatarDirectory, "$filePrefix$extension")
+                val temporary = File(avatarDirectory, "$safeId-$version.tmp")
+                temporary.writeBytes(bytes)
+                if (!temporary.renameTo(target)) {
+                    target.writeBytes(bytes)
+                    temporary.delete()
+                }
+                user.copy(photoUrl = Uri.fromFile(target).toString())
+            }
+        }.getOrDefault(user)
+    }
+
     private fun requestJson(path: String): JSONObject {
-        val request = Request.Builder().url(apiRoot + path).get().build()
+        val request = baseRequest(apiRoot + path).get().build()
         return executeJson(request)
     }
 
     private fun postJson(path: String, body: JSONObject, headers: Map<String, String> = emptyMap()): JSONObject {
-        val builder = Request.Builder().url(apiRoot + path).post(body.toString().toRequestBody(jsonType))
+        val builder = baseRequest(apiRoot + path).post(body.toString().toRequestBody(jsonType))
         headers.forEach { (name, value) -> builder.header(name, value) }
         return executeJson(builder.build())
     }
 
+    private fun baseRequest(url: String): Request.Builder = Request.Builder()
+        .url(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", "StudyZone-Android/${BuildConfig.VERSION_NAME}")
+
     private fun executeJson(request: Request): JSONObject {
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
-            val json = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
-            if (!response.isSuccessful || json.optBoolean("ok", true).not()) {
-                throw ApiException(json.optString("error", "שגיאת שרת (${response.code})"), response.code)
+            val json = runCatching { JSONObject(raw) }.getOrNull()
+            if (!response.isSuccessful || json == null || !json.optBoolean("ok", true)) {
+                throw apiError(raw, response.code)
             }
             return json
         }
     }
 
+    private fun apiError(raw: String, status: Int): ApiException {
+        val json = runCatching { JSONObject(raw) }.getOrNull()
+        val nested = json?.optJSONObject("error")
+        val serverMessage = when {
+            nested != null -> nested.optString("message")
+            else -> json?.optString("error").orEmpty().ifBlank { json?.optString("message").orEmpty() }
+        }
+        val message = localizeServerMessage(serverMessage).ifBlank {
+            when (status) {
+                401 -> "החיבור לחשבון פג. יש להתחבר מחדש"
+                403 -> "אין הרשאה לבצע את הפעולה"
+                404 -> "המידע המבוקש לא נמצא"
+                429 -> "יש עומס זמני. נסו שוב בעוד רגע"
+                in 500..599 -> "שירות StudyZone אינו זמין כרגע"
+                else -> "שגיאת שרת ($status)"
+            }
+        }
+        return ApiException(message, status, json?.optString("kind")?.takeIf(String::isNotBlank))
+    }
+
+    private fun absoluteUrl(raw: String): String = when {
+        raw.isBlank() || raw == "null" -> ""
+        raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("file:") -> raw
+        raw.startsWith("/") -> apiBase + raw
+        else -> "$apiBase/${raw.trimStart('/')}"
+    }
+
+    private fun cacheAccount(snapshot: AccountSnapshot) {
+        if (snapshot.user == null) {
+            clearCachedAccount()
+            return
+        }
+        val payload = JSONObject()
+            .put("user", snapshot.user.toJson())
+            .put("completedSections", JSONArray(snapshot.completedSections.sorted()))
+            .put("bookmarkedSections", JSONArray(snapshot.bookmarkedSections.sorted()))
+        accountCache.edit().putString(ACCOUNT_VALUE, payload.toString()).apply()
+    }
+
+    private fun readCachedAccount(): AccountSnapshot {
+        val raw = accountCache.getString(ACCOUNT_VALUE, null) ?: return AccountSnapshot(null, emptySet(), emptySet())
+        return runCatching {
+            val payload = JSONObject(raw)
+            var user = payload.optJSONObject("user")?.toUser(apiBase)
+            if (user?.photoUrl?.startsWith("file:") == true) {
+                val file = runCatching { File(Uri.parse(user.photoUrl).path.orEmpty()) }.getOrNull()
+                if (file?.isFile != true) user = user.copy(photoUrl = null)
+            }
+            AccountSnapshot(
+                user = user,
+                completedSections = payload.optJSONArray("completedSections").toStringSet(),
+                bookmarkedSections = payload.optJSONArray("bookmarkedSections").toStringSet()
+            )
+        }.getOrElse {
+            clearCachedAccount()
+            AccountSnapshot(null, emptySet(), emptySet())
+        }
+    }
+
+    private fun clearCachedAccount() {
+        accountCache.edit().clear().apply()
+        avatarDirectory.listFiles()?.forEach { it.delete() }
+    }
+
     private fun encode(value: String) = java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
+
+    companion object {
+        private const val ACCOUNT_CACHE = "studyzone_account_cache_v2"
+        private const val ACCOUNT_VALUE = "account"
+        private const val MAX_AVATAR_BYTES = 5L * 1024L * 1024L
+    }
+}
+
+private fun localizeServerMessage(raw: String): String {
+    val message = raw.trim()
+    return when (message.lowercase()) {
+        "invalid password", "user not found" -> "האימייל או הסיסמה שגויים"
+        "blocked", "account blocked" -> "החשבון חסום. יש לפנות למנהל"
+        "use google login" -> "החשבון מחובר דרך Google"
+        "please verify your email first.", "account not verified" -> "יש לאמת את כתובת האימייל לפני ההתחברות"
+        "user already exists" -> "כבר קיים חשבון עם כתובת האימייל הזו"
+        "invalid email" -> "כתובת האימייל אינה תקינה"
+        "missing email or password", "missing fields" -> "חסרים פרטי התחברות"
+        "forbidden" -> "אין הרשאה לבצע את הפעולה"
+        "session expired" -> "החיבור לחשבון פג. יש להתחבר מחדש"
+        else -> message
+    }
 }
 
 private class PersistentCookieJar(context: Context, private val baseUrl: HttpUrl) : CookieJar {
@@ -273,19 +589,30 @@ private class PersistentCookieJar(context: Context, private val baseUrl: HttpUrl
 
     @Synchronized
     override fun saveFromResponse(url: HttpUrl, incoming: List<Cookie>) {
+        var changed = false
         incoming.forEach { fresh ->
-            cookies.removeAll { it.name == fresh.name && it.domain == fresh.domain && it.path == fresh.path }
-            if (fresh.expiresAt > System.currentTimeMillis()) cookies += fresh
+            changed = cookies.removeAll {
+                it.name == fresh.name && it.domain == fresh.domain && it.path == fresh.path
+            } || changed
+            if (fresh.expiresAt > System.currentTimeMillis()) {
+                cookies += fresh
+                changed = true
+            }
         }
-        persist()
+        if (changed) persist()
     }
 
     @Synchronized
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val now = System.currentTimeMillis()
-        cookies.removeAll { it.expiresAt <= now }
-        persist()
+        if (cookies.removeAll { it.expiresAt <= now }) persist()
         return cookies.filter { it.matches(url) }
+    }
+
+    @Synchronized
+    fun clear() {
+        cookies.clear()
+        prefs.edit().clear().apply()
     }
 
     private fun persist() {
@@ -297,37 +624,33 @@ private fun JSONArray?.toCourses(): List<Course> = buildList {
     val array = this@toCourses ?: return@buildList
     for (index in 0 until array.length()) {
         val item = array.optJSONObject(index) ?: continue
+        val id = item.optString("id")
+        if (id.isBlank()) continue
         add(
             Course(
-                id = item.optString("id"),
-                title = item.optString("title"),
+                id = id,
+                title = item.optString("title").ifBlank { id },
                 description = item.optString("description"),
                 category = item.optString("category", "other"),
                 iconId = item.optString("iconId", "book"),
                 isAvailable = item.optBoolean("isAvailable", true),
-                chapters = buildList {
-                    val chapters = item.optJSONArray("chapters") ?: return@buildList
+                chapters = buildList chapterList@ {
+                    val chapters = item.optJSONArray("chapters") ?: return@chapterList
                     for (chapterIndex in 0 until chapters.length()) {
                         val chapter = chapters.optJSONObject(chapterIndex) ?: continue
-                        add(
-                            Chapter(
-                                id = chapter.optString("id"),
-                                title = chapter.optString("title"),
-                                sections = buildList {
-                                    val sections = chapter.optJSONArray("sections") ?: return@buildList
-                                    for (sectionIndex in 0 until sections.length()) {
-                                        val section = sections.optJSONObject(sectionIndex) ?: continue
-                                        add(
-                                            Section(
-                                                id = section.optString("id"),
-                                                title = section.optString("title"),
-                                                preview = section.optString("preview")
-                                            )
-                                        )
-                                    }
-                                }
-                            )
-                        )
+                        val chapterId = chapter.optString("id")
+                        val sections = buildList sectionList@ {
+                            val sectionArray = chapter.optJSONArray("sections") ?: return@sectionList
+                            for (sectionIndex in 0 until sectionArray.length()) {
+                                val section = sectionArray.optJSONObject(sectionIndex) ?: continue
+                                val sectionId = section.optString("id")
+                                if (sectionId.isBlank()) continue
+                                add(Section(sectionId, section.optString("title").ifBlank { "סעיף $sectionId" }, section.optString("preview")))
+                            }
+                        }
+                        if (chapterId.isNotBlank() && sections.isNotEmpty()) {
+                            add(Chapter(chapterId, chapter.optString("title").ifBlank { "פרק $chapterId" }, sections))
+                        }
                     }
                 }
             )
@@ -341,29 +664,70 @@ private fun JSONObject.toLesson() = Lesson(
     chapterId = optString("chapterId"),
     sectionId = optString("sectionId"),
     title = optString("title"),
-    content = optString("content"),
+    content = normalizeLessonContent(optString("content")),
     interactiveUrl = optString("interactiveUrl"),
-    previousSectionId = optString("previousSectionId").ifBlank { null },
-    nextSectionId = optString("nextSectionId").ifBlank { null }
+    previousSectionId = optNullableString("previousSectionId"),
+    nextSectionId = optNullableString("nextSectionId")
 )
 
-private fun JSONObject.toUser() = User(
-    userId = optString("userId"),
-    email = optString("email"),
-    displayName = optString("displayName").ifBlank { optString("email").substringBefore('@') },
-    photoUrl = optString("photoURL").ifBlank { null },
-    isAdmin = optBoolean("isAdmin"),
-    isGoogle = optBoolean("isGoogle")
-)
+private fun JSONObject.toUser(apiBase: String): User {
+    val rawPhoto = firstString("photoURL", "photoUrl", "picture", "avatar")
+    val absolutePhoto = when {
+        rawPhoto.isBlank() -> null
+        rawPhoto.startsWith("http://") || rawPhoto.startsWith("https://") || rawPhoto.startsWith("file:") -> rawPhoto
+        rawPhoto.startsWith("/") -> apiBase + rawPhoto
+        else -> "$apiBase/${rawPhoto.trimStart('/')}"
+    }
+    val email = firstString("email", "mail")
+    return User(
+        userId = firstString("userId", "uid", "id"),
+        email = email,
+        displayName = firstString("displayName", "name").ifBlank { email.substringBefore('@') },
+        photoUrl = absolutePhoto,
+        isAdmin = optBoolean("isAdmin", false),
+        isGoogle = optBoolean("isGoogle", false)
+    )
+}
 
-private fun JSONObject.toLoginUser() = User(
-    userId = optString("userId"),
-    email = optString("email"),
-    displayName = optString("displayName").ifBlank { optString("email").substringBefore('@') },
-    photoUrl = optString("photoURL").ifBlank { null },
-    isAdmin = optBoolean("isAdmin"),
-    isGoogle = optBoolean("isGoogle")
-)
+private fun User.sameIdentityAs(other: User): Boolean {
+    if (userId.isNotBlank() && other.userId.isNotBlank()) return userId == other.userId
+    return email.isNotBlank() && email.equals(other.email, ignoreCase = true)
+}
+
+private fun User.toJson() = JSONObject()
+    .put("userId", userId)
+    .put("email", email)
+    .put("displayName", displayName)
+    .put("photoURL", photoUrl)
+    .put("isAdmin", isAdmin)
+    .put("isGoogle", isGoogle)
+
+private fun JSONObject?.toAccountSnapshot(user: User?): StudyZoneApi.AccountSnapshot {
+    val data = this
+    val completed = data?.optJSONArray("completedSections").toStringSet()
+    val bookmarks = data?.optJSONObject("pythiMemories")?.opt("bookmarks").toBookmarkKeys()
+    return StudyZoneApi.AccountSnapshot(user, completed, bookmarks)
+}
+
+private fun Any?.toBookmarkKeys(): Set<String> {
+    val array = when (this) {
+        is JSONArray -> this
+        is String -> runCatching { JSONArray(this) }.getOrNull()
+        else -> null
+    } ?: return emptySet()
+    return buildSet {
+        for (index in 0 until array.length()) {
+            when (val item = array.opt(index)) {
+                is String -> if (item.isNotBlank()) add(item)
+                is JSONObject -> {
+                    val courseId = item.optString("courseId")
+                    val sectionId = item.optString("sectionId")
+                    if (courseId.isNotBlank() && sectionId.isNotBlank()) add("$courseId::$sectionId")
+                }
+            }
+        }
+    }
+}
 
 private fun JSONArray?.toSearchResults(): List<SearchResult> = buildList {
     val array = this@toSearchResults ?: return@buildList
@@ -393,18 +757,21 @@ private fun JSONObject.toAdminOverview() = AdminOverview(
     pythiChatModel = optString("pythiChatModel")
 )
 
-private fun JSONArray?.toAdminUsers(): List<AdminUser> = buildList {
+private fun JSONArray?.toAdminUsers(apiBase: String): List<AdminUser> = buildList {
     val array = this@toAdminUsers ?: return@buildList
     for (index in 0 until array.length()) {
         val item = array.optJSONObject(index) ?: continue
         add(
             AdminUser(
-                id = item.optString("id"),
+                id = item.firstString("id", "userId", "uid"),
                 email = item.optString("email"),
                 displayName = item.optString("displayName"),
                 isBlocked = item.optBoolean("isBlocked"),
                 isVerified = item.optBoolean("isVerified", true),
-                createdAt = item.optLong("createdAt").takeIf { it > 0 }
+                createdAt = item.optLongOrNull("createdAt"),
+                photoUrl = item.optNullableString("photoURL")?.let {
+                    if (it.startsWith("/")) apiBase + it else it
+                }
             )
         )
     }
@@ -427,7 +794,26 @@ private fun JSONArray?.toAccessRequests(): List<AccessRequest> = buildList {
     }
 }
 
+private fun JSONObject.firstString(vararg keys: String): String {
+    keys.forEach { key -> optString(key).takeIf { it.isNotBlank() && it != "null" }?.let { return it } }
+    return ""
+}
+
+private fun JSONObject.optNullableString(key: String): String? =
+    optString(key).takeIf { it.isNotBlank() && it != "null" }
+
+private fun JSONObject.optLongOrNull(key: String): Long? {
+    val value = opt(key)
+    return when (value) {
+        is Number -> value.toLong()
+        is String -> value.toLongOrNull()
+        else -> null
+    }?.takeIf { it > 0L }
+}
+
 private fun JSONArray?.toStringSet(): Set<String> = buildSet {
     val array = this@toStringSet ?: return@buildSet
-    for (index in 0 until array.length()) add(array.optString(index))
+    for (index in 0 until array.length()) {
+        array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+    }
 }

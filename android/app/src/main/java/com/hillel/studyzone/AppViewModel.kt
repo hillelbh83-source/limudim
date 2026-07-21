@@ -3,7 +3,9 @@ package com.hillel.studyzone
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hillel.studyzone.data.FallbackCatalog
 import com.hillel.studyzone.data.LocalPreferences
+import com.hillel.studyzone.data.LocalSnapshot
 import com.hillel.studyzone.data.StudyZoneApi
 import com.hillel.studyzone.model.AppSettings
 import com.hillel.studyzone.model.ChatMessage
@@ -11,89 +13,239 @@ import com.hillel.studyzone.model.Course
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
 import com.hillel.studyzone.model.UiState
+import com.hillel.studyzone.model.User
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Call
+import java.util.concurrent.atomic.AtomicReference
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
-    private val api = StudyZoneApi(application)
+    // OkHttp restores its persistent cookie jar during construction. Deferring that work keeps it
+    // out of Activity/ViewModel creation and therefore out of the cold-start critical path.
+    private val api by lazy { StudyZoneApi(application) }
     private val preferences = LocalPreferences(application)
-    private val mutableState = MutableStateFlow(UiState())
+    // Never gate the first frame on disk or network. The richer cached/server catalog replaces
+    // this lightweight fallback without taking the UI away from the user.
+    private val mutableState = MutableStateFlow(
+        UiState(isBootstrapping = false, courses = FallbackCatalog.courses)
+    )
     val state: StateFlow<UiState> = mutableState.asStateFlow()
+    val settings: StateFlow<AppSettings> = state
+        .map { it.settings }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, mutableState.value.settings)
 
     private var searchJob: Job? = null
+    private var searchGeneration = 0L
+    private var lessonJob: Job? = null
+    private var lessonGeneration = 0L
+    private var bootstrapJob: Job? = null
+    private var bootstrapGeneration = 0L
+    private var cacheJob: Job? = null
+    private var adminJob: Job? = null
+    private var adminGeneration = 0L
     private var chatCall: Call? = null
+    private var chatRenderJob: Job? = null
+    @Volatile private var chatGeneration = 0L
+    private val pendingChatText = AtomicReference<String?>(null)
 
     init {
         viewModelScope.launch {
-            preferences.snapshot.collect { (settings, completed, bookmarks) ->
+            // DataStore is fast and decoded off-main, but is still not allowed to delay rendering.
+            val local = try {
+                preferences.snapshot.first()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
+            if (local != null) applyLocalSnapshot(local, includeCachedSession = true)
+
+            // Future preference writes only update preference-owned fields. This prevents a stale
+            // disk emission from replacing a freshly authenticated server session.
+            viewModelScope.launch {
+                try {
+                    preferences.snapshot.drop(1).collect { snapshot ->
+                        applyLocalSnapshot(snapshot, includeCachedSession = false)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // Preference corruption must not take the live server-backed UI down.
+                }
+            }
+
+            // Replace the tiny first-frame fallback with the full APK-bundled index. This call is
+            // strictly local (assets + sanitized account cache) and still runs off the main thread.
+            val bundled = try {
+                withContext(Dispatchers.IO) { api.bootstrap() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
+            if (bundled != null) applyBootstrapPayload(bundled, preserveCurrentUser = true)
+
+            // Cookie/profile/progress revalidation is a separate background phase.
+            refreshFromServer(preserveCurrentUser = false)
+        }
+    }
+
+    private fun applyLocalSnapshot(snapshot: LocalSnapshot, includeCachedSession: Boolean) {
+        mutableState.update { current ->
+            current.copy(
+                settings = snapshot.settings,
+                completedSections = if (includeCachedSession) snapshot.completed else current.completedSections,
+                bookmarkedSections = if (includeCachedSession) snapshot.bookmarks else current.bookmarkedSections,
+                user = if (includeCachedSession) snapshot.user else current.user,
+                isBootstrapping = false
+            )
+        }
+    }
+
+    fun bootstrap() = refreshFromServer(preserveCurrentUser = false)
+
+    private fun refreshFromServer(preserveCurrentUser: Boolean) {
+        val generation = ++bootstrapGeneration
+        bootstrapJob?.cancel()
+        mutableState.update { current ->
+            current.copy(isBootstrapping = current.courses.isEmpty(), error = null)
+        }
+        bootstrapJob = viewModelScope.launch {
+            try {
+                // Resolve the lazy network stack (including cookie restoration) off-main.
+                val payload = withContext(Dispatchers.IO) { api.refreshBootstrap() }
+                if (generation != bootstrapGeneration) return@launch
+                applyBootstrapPayload(payload, preserveCurrentUser)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (generation != bootstrapGeneration) return@launch
                 mutableState.update {
-                    it.copy(settings = settings, completedSections = completed, bookmarkedSections = bookmarks)
+                    it.copy(
+                        isBootstrapping = false,
+                        // Cached/fallback content remains fully usable while the refresh retries.
+                        error = error.userMessage("לא הצלחנו לרענן את הנתונים מהשרת")
+                    )
                 }
             }
         }
-        bootstrap()
     }
 
-    fun bootstrap() {
-        viewModelScope.launch {
-            mutableState.update { it.copy(isBootstrapping = true, error = null) }
-            runCatching { api.bootstrap() }
-                .onSuccess { payload ->
-                    mutableState.update {
-                        it.copy(
-                            isBootstrapping = false,
-                            courses = payload.courses,
-                            user = payload.user,
-                            completedSections = it.completedSections + payload.completedSections,
-                            error = null
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(
-                            isBootstrapping = false,
-                            error = error.userMessage("לא הצלחנו להתחבר לשרת")
-                        )
-                    }
-                }
+    private fun applyBootstrapPayload(payload: StudyZoneApi.Bootstrap, preserveCurrentUser: Boolean) {
+        var resolvedCourses: List<Course> = emptyList()
+        var resolvedUser = payload.user
+        var resolvedCompleted: Set<String> = emptySet()
+        var resolvedBookmarks: Set<String> = emptySet()
+        mutableState.update {
+            resolvedCourses = preferDetailedCatalog(it.courses, payload.courses)
+            val accountChanged = it.user != null && payload.user != null &&
+                !it.user.sameIdentityAs(payload.user)
+            resolvedUser = payload.user ?: if (preserveCurrentUser) it.user else null
+            resolvedCompleted = if (accountChanged) {
+                payload.completedSections
+            } else {
+                it.completedSections + payload.completedSections
+            }
+            resolvedBookmarks = if (accountChanged) {
+                payload.bookmarkedSections
+            } else {
+                it.bookmarkedSections + payload.bookmarkedSections
+            }
+            val selectedId = it.selectedCourse?.id
+            it.copy(
+                isBootstrapping = false,
+                courses = resolvedCourses,
+                selectedCourse = selectedId?.let { id -> resolvedCourses.firstOrNull { course -> course.id == id } },
+                user = resolvedUser,
+                completedSections = resolvedCompleted,
+                bookmarkedSections = resolvedBookmarks,
+                error = null
+            )
+        }
+
+        // Only the newest payload may win the disk cache if local and network phases overlap.
+        cacheJob?.cancel()
+        cacheJob = viewModelScope.launch {
+            preferences.saveRemoteSnapshot(
+                user = resolvedUser,
+                completed = resolvedCompleted,
+                bookmarks = resolvedBookmarks
+            )
         }
     }
 
     fun selectTab(tab: RootTab) {
-        mutableState.update { it.copy(rootTab = tab, selectedCourse = null, lesson = null) }
+        cancelLessonRequest()
+        mutableState.update {
+            it.copy(rootTab = tab, selectedCourse = null, lesson = null, lessonLoading = false)
+        }
     }
 
     fun openCourse(course: Course) {
-        mutableState.update { it.copy(selectedCourse = course, lesson = null, rootTab = RootTab.COURSES) }
+        cancelLessonRequest()
+        val currentCourse = mutableState.value.courses.firstOrNull { it.id == course.id } ?: course
+        mutableState.update {
+            it.copy(
+                selectedCourse = currentCourse,
+                lesson = null,
+                lessonLoading = false,
+                rootTab = RootTab.COURSES
+            )
+        }
     }
 
     fun closeCourse() {
-        mutableState.update { it.copy(selectedCourse = null, lesson = null) }
+        cancelLessonRequest()
+        mutableState.update { it.copy(selectedCourse = null, lesson = null, lessonLoading = false) }
     }
 
     fun openLesson(courseId: String, sectionId: String) {
         val course = mutableState.value.courses.firstOrNull { it.id == courseId } ?: return
+        if (mutableState.value.lesson?.let { it.courseId == courseId && it.sectionId == sectionId } == true) return
+        cancelLessonRequest()
+        val generation = lessonGeneration
         mutableState.update { it.copy(selectedCourse = course, lessonLoading = true, lesson = null, error = null) }
-        viewModelScope.launch {
-            runCatching { api.lesson(courseId, sectionId) }
-                .onSuccess { lesson -> mutableState.update { it.copy(lesson = lesson, lessonLoading = false) } }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(lessonLoading = false, toast = error.userMessage("לא הצלחנו לטעון את השיעור"))
-                    }
+        lessonJob = viewModelScope.launch {
+            try {
+                val lesson = api.lesson(courseId, sectionId)
+                if (generation != lessonGeneration) return@launch
+                mutableState.update { it.copy(lesson = lesson, lessonLoading = false) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (generation != lessonGeneration) return@launch
+                mutableState.update {
+                    it.copy(lessonLoading = false, toast = error.userMessage("לא הצלחנו לטעון את השיעור"))
                 }
+            }
         }
     }
 
     fun closeLesson() {
+        cancelLessonRequest()
         mutableState.update { it.copy(lesson = null, lessonLoading = false) }
+    }
+
+    private fun cancelLessonRequest() {
+        lessonGeneration++
+        lessonJob?.cancel()
+        lessonJob = null
     }
 
     fun openAdjacent(sectionId: String?) {
@@ -103,6 +255,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSearchQuery(query: String) {
         mutableState.update { it.copy(searchQuery = query) }
+        val generation = ++searchGeneration
         searchJob?.cancel()
         if (query.trim().length < 2) {
             mutableState.update { it.copy(searchResults = emptyList(), searchLoading = false) }
@@ -110,14 +263,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         searchJob = viewModelScope.launch {
             delay(320)
+            if (generation != searchGeneration) return@launch
             mutableState.update { it.copy(searchLoading = true) }
-            runCatching { api.search(query.trim()) }
-                .onSuccess { results -> mutableState.update { it.copy(searchResults = results, searchLoading = false) } }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(searchLoading = false, toast = error.userMessage("החיפוש נכשל"))
-                    }
+            try {
+                val results = api.search(query.trim())
+                if (generation != searchGeneration) return@launch
+                mutableState.update { it.copy(searchResults = results, searchLoading = false) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (generation != searchGeneration) return@launch
+                mutableState.update {
+                    it.copy(searchLoading = false, toast = error.userMessage("החיפוש נכשל"))
                 }
+            }
         }
     }
 
@@ -146,7 +305,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun syncUserData() {
         val snapshot = mutableState.value
         if (snapshot.user == null) return
-        runCatching { api.syncProgress(snapshot.completedSections) }
+        runCatching { api.syncUserData(snapshot.completedSections, snapshot.bookmarkedSections) }
     }
 
     fun setTheme(themeMode: ThemeMode) = updateSettings(mutableState.value.settings.copy(themeMode = themeMode))
@@ -163,22 +322,69 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setAuthOpen(open: Boolean) = mutableState.update { it.copy(authOpen = open) }
 
     fun login(email: String, password: String) {
+        if (mutableState.value.authLoading) return
         if (email.isBlank() || password.isBlank()) {
             mutableState.update { it.copy(toast = "יש למלא אימייל וסיסמה") }
             return
         }
+        val accountHint = mutableState.value.user
+        val localCompletedHint = mutableState.value.completedSections
+        val localBookmarksHint = mutableState.value.bookmarkedSections
         viewModelScope.launch {
             mutableState.update { it.copy(authLoading = true) }
             runCatching { api.login(email.trim(), password) }
-                .onSuccess { user ->
-                    mutableState.update { it.copy(user = user, authOpen = false, authLoading = false, toast = "ברוכים הבאים, ${user.displayName}") }
-                    refreshSession()
+                .onSuccess { account ->
+                    val user = account.user
+                    val samePreviousAccount = accountHint?.sameIdentityAs(user) == true
+                    val resolvedCompleted = if (samePreviousAccount) {
+                        localCompletedHint + account.completedSections
+                    } else {
+                        account.completedSections
+                    }
+                    val resolvedBookmarks = if (samePreviousAccount) {
+                        localBookmarksHint + account.bookmarkedSections
+                    } else {
+                        account.bookmarkedSections
+                    }
+                    // An older launch-time revalidation must not clear the freshly
+                    // authenticated session when its pre-login request completes.
+                    bootstrapGeneration++
+                    bootstrapJob?.cancel()
+                    bootstrapJob = null
+                    mutableState.update {
+                        it.copy(
+                            user = user,
+                            completedSections = resolvedCompleted,
+                            bookmarkedSections = resolvedBookmarks,
+                            authOpen = false,
+                            authLoading = false,
+                            toast = "ברוכים הבאים, ${user.displayName}"
+                        )
+                    }
+                    cacheJob?.cancel()
+                    try {
+                        preferences.saveRemoteSnapshot(
+                            user = user,
+                            completed = resolvedCompleted,
+                            bookmarks = resolvedBookmarks
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        // A cache write failure must not undo a successful login.
+                    }
+                    val hasLocalStateToMerge = resolvedCompleted != account.completedSections ||
+                        resolvedBookmarks != account.bookmarkedSections
+                    if (samePreviousAccount && hasLocalStateToMerge) {
+                        runCatching { api.syncUserData(resolvedCompleted, resolvedBookmarks) }
+                    }
                 }
                 .onFailure { error -> mutableState.update { it.copy(authLoading = false, toast = error.userMessage("ההתחברות נכשלה")) } }
         }
     }
 
     fun register(name: String, email: String, password: String) {
+        if (mutableState.value.authLoading) return
         if (name.isBlank() || email.isBlank() || password.length < 8) {
             mutableState.update { it.copy(toast = "יש למלא שם, אימייל וסיסמה בת 8 תווים לפחות") }
             return
@@ -192,23 +398,45 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
-        viewModelScope.launch {
-            runCatching { api.logout() }
-            mutableState.update { it.copy(user = null, adminOpen = false, toast = "התנתקת בהצלחה") }
+        bootstrapGeneration++
+        bootstrapJob?.cancel()
+        bootstrapJob = null
+        cacheJob?.cancel()
+        cacheJob = null
+        adminGeneration++
+        adminJob?.cancel()
+        adminJob = null
+        clearChat()
+        mutableState.update {
+            it.copy(
+                user = null,
+                completedSections = emptySet(),
+                bookmarkedSections = emptySet(),
+                authOpen = false,
+                authLoading = false,
+                adminOpen = false,
+                adminOverview = null,
+                adminUsers = emptyList(),
+                accessRequests = emptyList(),
+                publicCourseIds = emptySet(),
+                chatOpen = false,
+                chatExpanded = false,
+                toast = "התנתקת בהצלחה"
+            )
         }
-    }
-
-    private fun refreshSession() {
         viewModelScope.launch {
-            runCatching { api.bootstrap() }.onSuccess { payload ->
-                mutableState.update {
-                    it.copy(
-                        courses = payload.courses,
-                        user = payload.user ?: it.user,
-                        completedSections = it.completedSections + payload.completedSections
-                    )
-                }
+            try {
+                preferences.saveRemoteSnapshot(
+                    user = null,
+                    completed = emptySet(),
+                    bookmarks = emptySet()
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Server logout still has to run if the local cache is unavailable.
             }
+            runCatching { api.logout() }
         }
     }
 
@@ -245,47 +473,87 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val messages = snapshot.chatMessages + userMessage + modelMessage
         mutableState.update { it.copy(chatInput = "", chatMessages = messages, chatStreaming = true) }
 
-        val apiMessages = messages.dropLast(1).map { it.role to it.text }
+        val apiMessages = messages.dropLast(1)
+            .filterNot { it.isError }
+            .map { it.role to it.text }
+        val generation = ++chatGeneration
         chatCall?.cancel()
-        chatCall = api.streamChat(
-            messages = apiMessages,
-            course = snapshot.selectedCourse,
-            lesson = snapshot.lesson,
-            onDelta = { fullText ->
-                mutableState.update { current ->
-                    current.copy(chatMessages = current.chatMessages.updateLastModel(fullText, streaming = true))
+        pendingChatText.set(null)
+        startChatRenderer(generation)
+        chatCall = try {
+            api.streamChat(
+                messages = apiMessages,
+                course = snapshot.selectedCourse,
+                lesson = snapshot.lesson,
+                onDelta = { fullText ->
+                    if (generation == chatGeneration) pendingChatText.set(fullText)
+                },
+                onDone = {
+                    finishChat(generation, error = null)
+                },
+                onError = { error ->
+                    finishChat(generation, error)
                 }
-            },
-            onDone = {
-                mutableState.update { current ->
-                    current.copy(
-                        chatStreaming = false,
-                        chatMessages = current.chatMessages.updateLastModel(
-                            current.chatMessages.lastOrNull()?.text.orEmpty(),
-                            streaming = false
-                        )
-                    )
+            )
+        } catch (error: Throwable) {
+            finishChat(generation, error)
+            null
+        }
+    }
+
+    /** Coalesces fast streaming chunks to one state update per frame instead of recomposing per token. */
+    private fun startChatRenderer(generation: Long) {
+        chatRenderJob?.cancel()
+        chatRenderJob = viewModelScope.launch {
+            while (isActive && generation == chatGeneration) {
+                pendingChatText.getAndSet(null)?.let { text ->
+                    mutableState.update { current ->
+                        current.copy(chatMessages = current.chatMessages.updateLastModel(text, streaming = true))
+                    }
                 }
-            },
-            onError = { error ->
-                mutableState.update { current ->
-                    current.copy(
-                        chatStreaming = false,
-                        chatMessages = current.chatMessages.updateLastModel(
-                            error.userMessage("Pythi לא זמינה כרגע"),
-                            streaming = false,
-                            isError = true
-                        )
-                    )
-                }
+                delay(32)
             }
-        )
+        }
+    }
+
+    private fun finishChat(generation: Long, error: Throwable?) {
+        viewModelScope.launch {
+            if (generation != chatGeneration) return@launch
+            chatRenderJob?.cancel()
+            chatRenderJob = null
+            val finalText = pendingChatText.getAndSet(null)
+            mutableState.update { current ->
+                val currentText = current.chatMessages.lastOrNull { it.role == "model" }?.text.orEmpty()
+                current.copy(
+                    chatStreaming = false,
+                    chatMessages = current.chatMessages.updateLastModel(
+                        text = error?.userMessage("Pythi לא זמינה כרגע") ?: finalText ?: currentText,
+                        streaming = false,
+                        isError = error != null
+                    )
+                )
+            }
+            chatCall = null
+        }
     }
 
     fun stopChat() {
+        chatGeneration++
         chatCall?.cancel()
         chatCall = null
-        mutableState.update { it.copy(chatStreaming = false, chatMessages = it.chatMessages.updateLastStreaming(false)) }
+        chatRenderJob?.cancel()
+        chatRenderJob = null
+        val finalText = pendingChatText.getAndSet(null)
+        mutableState.update { current ->
+            current.copy(
+                chatStreaming = false,
+                chatMessages = if (finalText.isNullOrBlank()) {
+                    current.chatMessages.updateLastStreaming(false)
+                } else {
+                    current.chatMessages.updateLastModel(finalText, streaming = false)
+                }
+            )
+        }
     }
 
     fun clearChat() {
@@ -302,13 +570,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         loadAdmin()
     }
 
-    fun closeAdmin() = mutableState.update { it.copy(adminOpen = false) }
+    fun closeAdmin() {
+        adminGeneration++
+        adminJob?.cancel()
+        adminJob = null
+        mutableState.update { it.copy(adminOpen = false, adminLoading = false) }
+    }
 
     fun loadAdmin() {
-        viewModelScope.launch {
+        val generation = ++adminGeneration
+        adminJob?.cancel()
+        adminJob = viewModelScope.launch {
             mutableState.update { it.copy(adminLoading = true) }
             runCatching { api.loadAdmin() }
                 .onSuccess { data ->
+                    if (generation != adminGeneration) return@onSuccess
                     mutableState.update {
                         it.copy(
                             adminLoading = false,
@@ -319,7 +595,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
-                .onFailure { error -> mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("טעינת הניהול נכשלה")) } }
+                .onFailure { error ->
+                    if (generation != adminGeneration) return@onFailure
+                    mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("טעינת הניהול נכשלה")) }
+                }
         }
     }
 
@@ -328,7 +607,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { api.toggleUserBlock(userId) }
                 .onSuccess { blocked ->
                     mutableState.update { current ->
-                        current.copy(adminUsers = current.adminUsers.map { if (it.id == userId) it.copy(isBlocked = blocked) else it })
+                        if (!current.adminOpen || current.user?.isAdmin != true) current else current.copy(
+                            adminUsers = current.adminUsers.map { if (it.id == userId) it.copy(isBlocked = blocked) else it }
+                        )
                     }
                 }
                 .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("הפעולה נכשלה")) } }
@@ -338,7 +619,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun handleAccessRequest(requestId: String, action: String) {
         viewModelScope.launch {
             runCatching { api.handleAccessRequest(requestId, action) }
-                .onSuccess { loadAdmin() }
+                .onSuccess {
+                    if (mutableState.value.adminOpen && mutableState.value.user?.isAdmin == true) loadAdmin()
+                }
                 .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("הפעולה נכשלה")) } }
         }
     }
@@ -346,7 +629,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun togglePublicCourse(courseId: String) {
         viewModelScope.launch {
             runCatching { api.togglePublicCourse(courseId) }
-                .onSuccess { ids -> mutableState.update { it.copy(publicCourseIds = ids) } }
+                .onSuccess { ids ->
+                    mutableState.update {
+                        if (!it.adminOpen || it.user?.isAdmin != true) it else it.copy(publicCourseIds = ids)
+                    }
+                }
                 .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("עדכון הקורס נכשל")) } }
         }
     }
@@ -356,7 +643,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { api.updateSystemSettings(requirePassword, geminiEnabled, shortExplain) }
                 .onSuccess {
                     mutableState.update {
-                        it.copy(
+                        if (!it.adminOpen || it.user?.isAdmin != true) it else it.copy(
                             adminOverview = it.adminOverview?.copy(
                                 requireCoursePassword = requirePassword,
                                 geminiServerKeysEnabled = geminiEnabled,
@@ -377,12 +664,54 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val course = mutableState.value.courses.firstOrNull { it.id == courseId } ?: return
         if (sectionId.isNullOrBlank()) openCourse(course) else openLesson(courseId, sectionId)
     }
+
+    override fun onCleared() {
+        chatGeneration++
+        chatCall?.cancel()
+        chatRenderJob?.cancel()
+        searchJob?.cancel()
+        lessonJob?.cancel()
+        bootstrapJob?.cancel()
+        cacheJob?.cancel()
+        adminJob?.cancel()
+        super.onCleared()
+    }
 }
 
 private fun lessonKey(courseId: String, sectionId: String) = "$courseId::$sectionId"
 private fun completionKey(courseId: String, chapterId: String, sectionId: String) = "$courseId/$chapterId/$sectionId"
 private fun Set<String>.toggle(value: String) = if (value in this) this - value else this + value
-private fun Throwable.userMessage(fallback: String) = message?.takeIf { it.isNotBlank() } ?: fallback
+private fun Throwable.userMessage(fallback: String): String {
+    if (this is java.io.IOException) return fallback
+    return message?.takeIf { it.isNotBlank() } ?: fallback
+}
+private fun User.sameIdentityAs(other: User): Boolean {
+    if (userId.isNotBlank() && other.userId.isNotBlank()) return userId == other.userId
+    return email.isNotBlank() && email.equals(other.email, ignoreCase = true)
+}
+
+/**
+ * `/mobile` may not be deployed yet and StudyZoneApi then returns the tiny fallback catalog.
+ * Never let that compatibility fallback overwrite a detailed catalog already cached on-device.
+ */
+private fun preferDetailedCatalog(current: List<Course>, refreshed: List<Course>): List<Course> {
+    if (refreshed.isEmpty()) return current
+    val currentSections = current.sumOf { course -> course.chapters.sumOf { it.sections.size } }
+    val refreshedSections = refreshed.sumOf { course -> course.chapters.sumOf { it.sections.size } }
+    val currentIsFallbackShape = current.isNotEmpty() && current.all { course ->
+        course.chapters.size == 1 && course.chapters.single().sections.size == 1
+    }
+    val refreshedIsFallbackShape = refreshed.isNotEmpty() && refreshed.all { course ->
+        course.chapters.size == 1 && course.chapters.single().sections.size == 1
+    }
+    return if ((!currentIsFallbackShape && currentSections > refreshedSections) ||
+        (refreshedIsFallbackShape && currentSections == refreshedSections)
+    ) {
+        current
+    } else {
+        refreshed
+    }
+}
 
 private fun List<ChatMessage>.updateLastModel(text: String, streaming: Boolean, isError: Boolean = false): List<ChatMessage> {
     val index = indexOfLast { it.role == "model" }

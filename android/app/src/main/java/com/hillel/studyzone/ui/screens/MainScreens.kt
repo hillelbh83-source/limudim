@@ -1,7 +1,5 @@
 package com.hillel.studyzone.ui.screens
 
-import android.net.Uri
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.spring
@@ -9,36 +7,41 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
-import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bookmark
@@ -49,14 +52,12 @@ import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Logout
-import androidx.compose.material.icons.rounded.MoreHoriz
-import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
@@ -64,10 +65,8 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -89,18 +88,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hillel.studyzone.BuildConfig
 import com.hillel.studyzone.model.Course
-import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
 import com.hillel.studyzone.model.UiState
 import com.hillel.studyzone.ui.components.GlassSurface
 import com.hillel.studyzone.ui.components.Pressable
+import com.hillel.studyzone.ui.components.ProfileAvatar
 import com.hillel.studyzone.ui.components.RoundActionButton
 import com.hillel.studyzone.ui.theme.StudyBlue
 import kotlinx.coroutines.delay
@@ -122,58 +120,123 @@ fun CoursesScreen(
         "school" to "בגרויות",
         "other" to "נוספים"
     )
-    val filtered = if (category == "all") state.courses else state.courses.filter { it.category == category }
+    val filtered = remember(category, state.courses) {
+        if (category == "all") state.courses else state.courses.filter { it.category == category }
+    }
+    var headerEntered by remember { mutableStateOf(state.settings.reduceMotion) }
+    var chipsEntered by remember { mutableStateOf(state.settings.reduceMotion) }
+    LaunchedEffect(state.settings.reduceMotion) {
+        if (state.settings.reduceMotion) {
+            headerEntered = true
+            chipsEntered = true
+        } else {
+            headerEntered = true
+            delay(45)
+            chipsEntered = true
+        }
+    }
 
     Column(modifier.fillMaxSize().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+        AnimatedVisibility(
+            visible = headerEntered,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 3 }),
+            exit = fadeOut()
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("StudyZone", style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    if (state.user != null) "שלום ${state.user.displayName}, ממשיכים ללמוד" else "כל מה שצריך כדי להבין באמת",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("StudyZone", style = MaterialTheme.typography.headlineLarge)
+                    Text(
+                        state.user?.displayName
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { "שלום $it, ממשיכים ללמוד" }
+                            ?: "כל מה שצריך כדי להבין באמת",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                RoundActionButton(
+                    icon = if (state.settings.themeMode == ThemeMode.DARK) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+                    contentDescription = "החלפת ערכת צבעים",
+                    onClick = onThemeToggle,
+                    size = 46.dp
                 )
-            }
-            RoundActionButton(
-                icon = if (state.settings.themeMode == ThemeMode.DARK) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
-                contentDescription = "החלפת ערכת צבעים",
-                onClick = onThemeToggle,
-                size = 46.dp
-            )
-            Spacer(Modifier.width(8.dp))
-            RoundActionButton(Icons.Rounded.Person, "פרופיל", onProfile, size = 46.dp, active = state.user != null)
-        }
-
-        androidx.compose.foundation.lazy.LazyRow(
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 22.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(categories.size) { index ->
-                val item = categories[index]
+                Spacer(Modifier.width(8.dp))
                 Pressable(
-                    onClick = { category = item.first },
-                    selected = category == item.first,
+                    onClick = onProfile,
+                    modifier = Modifier.size(48.dp),
                     shape = CircleShape,
-                    contentPadding = 11.dp
+                    selected = state.user != null,
+                    contentPadding = 0.dp
                 ) {
-                    Text(item.second, color = if (category == item.first) StudyBlue else MaterialTheme.colorScheme.onSurface)
+                    ProfileAvatar(
+                        photoUrl = state.user?.photoUrl,
+                        displayName = state.user?.displayName ?: "אורח",
+                        size = 46.dp
+                    )
                 }
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        AnimatedVisibility(
+            visible = chipsEntered,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+            exit = fadeOut()
+        ) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(categories.size) { index ->
+                    val item = categories[index]
+                    Pressable(
+                        onClick = { category = item.first },
+                        selected = category == item.first,
+                        shape = CircleShape,
+                        contentPadding = 10.dp
+                    ) {
+                        Text(
+                            item.second,
+                            color = if (category == item.first) StudyBlue else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(164.dp),
+            columns = GridCells.Adaptive(174.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, end = 18.dp, bottom = 130.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 136.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(filtered, key = { it.id }) { course ->
-                CourseCard(course, state.completedSections, onClick = { onCourse(course) })
+            if (state.courses.isEmpty()) {
+                items(4) { CourseCardSkeleton() }
+            } else if (filtered.isEmpty()) {
+                item { EmptyState(Icons.Rounded.School, "אין קורסים בקטגוריה", "אפשר לבחור קטגוריה אחרת") }
+            } else {
+                itemsIndexed(filtered, key = { _, course -> course.id }) { index, course ->
+                    var entered by remember(course.id) { mutableStateOf(state.settings.reduceMotion) }
+                    LaunchedEffect(course.id, state.settings.reduceMotion) {
+                        if (!state.settings.reduceMotion) delay(index.coerceAtMost(7) * 32L)
+                        entered = true
+                    }
+                    AnimatedVisibility(
+                        visible = entered,
+                        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 5 }) + scaleIn(initialScale = .97f),
+                        exit = fadeOut() + scaleOut(targetScale = .97f)
+                    ) {
+                        CourseCard(course, state.completedSections, onClick = { onCourse(course) })
+                    }
+                }
             }
         }
     }
@@ -181,48 +244,138 @@ fun CoursesScreen(
 
 @Composable
 private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Unit) {
-    val allSections = course.chapters.sumOf { it.sections.size }.coerceAtLeast(1)
-    val completedCount = completed.count { it.startsWith("${course.id}/") }
-    val progress = completedCount.toFloat() / allSections
-    val icon = when (course.iconId) {
-        "code" -> Icons.Rounded.Code
-        "math" -> Icons.Rounded.Calculate
-        "activity" -> Icons.Rounded.Psychology
-        else -> Icons.AutoMirrored.Rounded.MenuBook
-    }
+    val sectionCount = course.chapters.sumOf { it.sections.size }
+    val completedCount = completed.count { it.startsWith("${course.id}/") }.coerceAtMost(sectionCount)
+    val targetProgress = if (sectionCount == 0) 0f else completedCount.toFloat() / sectionCount
+    val progress by animateFloatAsState(targetProgress, spring(stiffness = 700f, dampingRatio = .82f), label = "courseProgress")
+    val icon = courseIcon(course.iconId)
+
     Pressable(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().aspectRatio(.84f),
-        contentPadding = 0.dp
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = 0.dp,
+        // Locked courses must still open their detail page so the user can
+        // understand the restriction and request access there.
+        enabled = true
     ) {
-        Column(Modifier.fillMaxSize().padding(17.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape).background(StudyBlue.copy(alpha = .13f)),
-                    contentAlignment = Alignment.Center
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 230.dp
+            if (compact) {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(min = 224.dp).padding(16.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(icon, null, tint = StudyBlue)
+                    CourseCardTop(course, icon, sectionCount)
+                    Column {
+                        Text(course.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            course.description,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(13.dp))
+                        CourseProgress(progress, completedCount, sectionCount)
+                    }
                 }
-                Spacer(Modifier.weight(1f))
-                Text("${course.chapters.size}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-            }
-            Column {
-                Text(course.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    course.description,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant)) {
-                    Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(StudyBlue))
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 166.dp).padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CourseIcon(icon, 54.dp)
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                course.title,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text("${course.chapters.size} פרקים", color = StudyBlue, style = MaterialTheme.typography.labelMedium)
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            course.description,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(13.dp))
+                        CourseProgress(progress, completedCount, sectionCount)
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun CourseCardTop(course: Course, icon: ImageVector, sectionCount: Int) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        CourseIcon(icon, 46.dp)
+        Spacer(Modifier.weight(1f))
+        Text(
+            "${course.chapters.size} פרקים · $sectionCount שיעורים",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun CourseIcon(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size * .36f)).background(StudyBlue.copy(alpha = .13f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, null, tint = StudyBlue, modifier = Modifier.size(size * .48f))
+    }
+}
+
+@Composable
+private fun CourseProgress(progress: Float, completed: Int, total: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.weight(1f).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).fillMaxHeight().background(StudyBlue))
+        }
+        Spacer(Modifier.width(9.dp))
+        Text(
+            if (total == 0) "חדש" else "$completed/$total",
+            color = if (progress > 0f) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium
+        )
+    }
+}
+
+@Composable
+private fun CourseCardSkeleton() {
+    GlassSurface(Modifier.fillMaxWidth().height(174.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+            Box(Modifier.fillMaxWidth(.64f).height(18.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+            Box(Modifier.fillMaxWidth().height(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+            Box(Modifier.fillMaxWidth(.8f).height(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+        }
+    }
+}
+
+private fun courseIcon(iconId: String): ImageVector = when (iconId) {
+    "code" -> Icons.Rounded.Code
+    "math", "function", "probability", "complex" -> Icons.Rounded.Calculate
+    "activity", "wave", "electricity" -> Icons.Rounded.Psychology
+    "history" -> Icons.Rounded.Description
+    "school" -> Icons.Rounded.School
+    else -> Icons.AutoMirrored.Rounded.MenuBook
 }
 
 @Composable
@@ -233,47 +386,154 @@ fun CourseDetailScreen(
     onRequestAccess: () -> Unit
 ) {
     val course = state.selectedCourse ?: return
+    var expandedChapters by remember(course.id) {
+        mutableStateOf(course.chapters.firstOrNull()?.id?.let(::setOf).orEmpty())
+    }
+    val totalSections = course.chapters.sumOf { it.sections.size }
+    val completedInCourse = state.completedSections.count { it.startsWith("${course.id}/") }.coerceAtMost(totalSections)
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, bottom = 130.dp)
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 136.dp)
     ) {
         item {
             Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "חזרה", onBack, size = 46.dp)
                 Spacer(Modifier.weight(1f))
-                RoundActionButton(Icons.Rounded.MoreHoriz, "פעולות נוספות", onRequestAccess, size = 46.dp)
+                if (!course.isAvailable) {
+                    RoundActionButton(Icons.Rounded.Lock, "בקשת גישה לקורס", onRequestAccess, size = 46.dp)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp)) {
+                Column(Modifier.padding(22.dp)) {
+                    CourseIcon(courseIcon(course.iconId), 60.dp)
+                    Spacer(Modifier.height(18.dp))
+                    Text(course.title, style = MaterialTheme.typography.displaySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        course.description,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    CourseProgress(
+                        progress = if (totalSections == 0) 0f else completedInCourse.toFloat() / totalSections,
+                        completed = completedInCourse,
+                        total = totalSections
+                    )
+                }
             }
             Spacer(Modifier.height(22.dp))
-            Text(course.title, style = MaterialTheme.typography.displaySmall)
+            Text("תוכן הקורס", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                "${course.chapters.size} פרקים · $totalSections שיעורים",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
+            )
             Spacer(Modifier.height(10.dp))
-            Text(course.description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(28.dp))
+        }
+        if (course.chapters.isEmpty()) {
+            item { EmptyState(Icons.AutoMirrored.Rounded.MenuBook, "הקורס מתעדכן", "התכנים יופיעו כאן ברגע שיהיו זמינים") }
         }
         course.chapters.forEach { chapter ->
             item(key = "chapter-${chapter.id}") {
-                Text(chapter.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 18.dp, bottom = 10.dp))
-            }
-            items(chapter.sections, key = { it.id }) { section ->
-                val done = "${course.id}/${chapter.id}/${section.id}" in state.completedSections
-                Pressable(
-                    onClick = { onLesson(section.id) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-                    contentPadding = 14.dp
+                val expanded = chapter.id in expandedChapters
+                val completedInChapter = chapter.sections.count { section ->
+                    "${course.id}/${chapter.id}/${section.id}" in state.completedSections
+                }
+                GlassSurface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).animateContentSize(spring(dampingRatio = .85f)),
+                    shape = RoundedCornerShape(26.dp),
+                    selected = expanded
                 ) {
-                    Box(
-                        Modifier.size(38.dp).clip(CircleShape)
-                            .background(if (done) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (done) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(19.dp))
-                        else Text(section.id.substringAfter('.'), fontWeight = FontWeight.Bold)
+                    Column {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(26.dp))
+                                .clickable {
+                                    expandedChapters = if (expanded) expandedChapters - chapter.id else expandedChapters + chapter.id
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(44.dp).clip(CircleShape).background(StudyBlue.copy(alpha = if (expanded) .2f else .11f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(chapter.id, color = StudyBlue, fontWeight = FontWeight.ExtraBold)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(chapter.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "${chapter.sections.size} שיעורים · $completedInChapter הושלמו",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            Icon(
+                                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                if (expanded) "כיווץ פרק" else "פתיחת פרק",
+                                tint = if (expanded) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        AnimatedVisibility(
+                            visible = expanded,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            Column {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                chapter.sections.forEachIndexed { index, section ->
+                                    val done = "${course.id}/${chapter.id}/${section.id}" in state.completedSections
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable(enabled = course.isAvailable) { onLesson(section.id) }
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            Modifier.size(38.dp).clip(CircleShape)
+                                                .background(if (done) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (done) {
+                                                Icon(Icons.Rounded.CheckCircle, "הושלם", tint = Color.White, modifier = Modifier.size(19.dp))
+                                            } else {
+                                                Text(
+                                                    section.id.substringAfterLast('.').ifBlank { (index + 1).toString() },
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.labelLarge
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(section.title, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                            if (section.preview.isNotBlank()) {
+                                                Text(
+                                                    section.preview,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        Icon(Icons.Rounded.ChevronLeft, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (index != chapter.sections.lastIndex) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(start = 64.dp),
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f)
+                                        )
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(section.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (section.preview.isNotBlank()) Text(section.preview, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                            }
+                        }
                     }
-                    Icon(Icons.Rounded.ChevronLeft, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -442,9 +702,11 @@ fun ProfileScreen(
         item {
             GlassSurface(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(58.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
-                        Text(state.user?.displayName?.take(1)?.uppercase() ?: "?", color = Color.White, style = MaterialTheme.typography.headlineMedium)
-                    }
+                    ProfileAvatar(
+                        photoUrl = state.user?.photoUrl,
+                        displayName = state.user?.displayName ?: "אורח",
+                        size = 62.dp
+                    )
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(state.user?.displayName ?: "אורח", style = MaterialTheme.typography.titleLarge)
@@ -510,7 +772,7 @@ fun ProfileScreen(
         }
         item {
             Text(
-                "StudyZone Android · 1.0.0\nNative Kotlin + Jetpack Compose",
+                "StudyZone Android · ${BuildConfig.VERSION_NAME}\nNative Kotlin + Jetpack Compose",
                 modifier = Modifier.fillMaxWidth().padding(20.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

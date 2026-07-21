@@ -63,7 +63,7 @@ object FallbackCatalog {
                     Chapter(
                         id = "1",
                         title = "הקורס המלא",
-                        sections = listOf(Section("1.1", "פתיחת הגרסה האינטראקטיבית"))
+                        sections = listOf(Section("1.1", "מבוא לקורס", definition.description))
                     )
                 )
             )
@@ -77,8 +77,8 @@ object FallbackCatalog {
             courseTitle = course.title,
             chapterId = "1",
             sectionId = sectionId.ifBlank { "1.1" },
-            title = course.title,
-            content = "",
+            title = "מבוא ל${course.title}",
+            content = "# ${course.title}\n\n${course.description}\n\nתוכן הקורס המלא זמין בחבילת התוכן של האפליקציה. אפשר לנסות לרענן את התוכן כאשר יש חיבור לרשת.",
             interactiveUrl = "${BuildConfig.WEB_BASE_URL.trimEnd('/')}/#${course.id}"
         )
     }

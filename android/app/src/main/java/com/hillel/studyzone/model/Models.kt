@@ -81,7 +81,8 @@ data class AdminUser(
     val displayName: String,
     val isBlocked: Boolean,
     val isVerified: Boolean,
-    val createdAt: Long?
+    val createdAt: Long?,
+    val photoUrl: String? = null
 )
 
 data class AccessRequest(
