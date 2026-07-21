@@ -1,0 +1,635 @@
+package com.hillel.studyzone.ui.screens
+
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.hillel.studyzone.model.AccessRequest
+import com.hillel.studyzone.model.AdminUser
+import com.hillel.studyzone.model.RootTab
+import com.hillel.studyzone.model.UiState
+import com.hillel.studyzone.ui.components.GlassSurface
+import com.hillel.studyzone.ui.components.LessonMathView
+import com.hillel.studyzone.ui.components.InteractiveLessonView
+import com.hillel.studyzone.ui.components.Pressable
+import com.hillel.studyzone.ui.components.RoundActionButton
+import com.hillel.studyzone.ui.theme.StudyBlue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+
+@Composable
+fun IntroSplash(visible: Boolean) {
+    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            var appeared by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { appeared = true }
+            val scale by animateFloatAsState(if (appeared) 1f else .72f, spring(dampingRatio = .58f), label = "intro")
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.alpha(scale)) {
+                Box(Modifier.size((84 * scale).dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(38.dp))
+                }
+                Spacer(Modifier.height(18.dp))
+                Text("StudyZone", color = Color.White, style = MaterialTheme.typography.headlineLarge)
+            }
+        }
+    }
+}
+
+@Composable
+fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier = Modifier) {
+    val tabs = listOf(
+        Triple(RootTab.COURSES, Icons.Rounded.AutoAwesome, "לימודים"),
+        Triple(RootTab.SEARCH, Icons.Rounded.Search, "חיפוש"),
+        Triple(RootTab.SAVED, Icons.Rounded.BookmarkBorder, "שמורים"),
+        Triple(RootTab.TOOLS, Icons.Rounded.Settings, "כלים"),
+        Triple(RootTab.PROFILE, Icons.Rounded.Group, "פרופיל")
+    )
+    GlassSurface(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp).navigationBarsPadding(),
+        shape = RoundedCornerShape(30.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceAround) {
+            tabs.forEach { item ->
+                val selected = active == item.first
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(if (selected) StudyBlue.copy(.14f) else Color.Transparent)
+                        .padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    IconButton(onClick = { onTab(item.first) }, modifier = Modifier.size(28.dp)) {
+                        Icon(item.second, item.third, tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(
+                        item.third,
+                        color = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LessonScreen(
+    state: UiState,
+    onBack: () -> Unit,
+    onBookmark: () -> Unit,
+    onCompleted: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+    val lesson = state.lesson
+    var interactive by remember(lesson?.sectionId) { mutableStateOf(lesson?.content.isNullOrBlank()) }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (state.lessonLoading || lesson == null) {
+            CircularProgressIndicator(Modifier.align(Alignment.Center))
+        } else {
+            if (interactive) InteractiveLessonView(lesson.interactiveUrl, Modifier.fillMaxSize().statusBarsPadding())
+            else LessonMathView(lesson.content, Modifier.fillMaxSize().statusBarsPadding())
+            GlassSurface(
+                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(),
+                shape = RoundedCornerShape(26.dp)
+            ) {
+                Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "חזרה", onBack, size = 42.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(lesson.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${lesson.courseTitle} · ${lesson.sectionId}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                    }
+                    RoundActionButton(
+                        if ("${lesson.courseId}::${lesson.sectionId}" in state.bookmarkedSections) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                        "שמירה",
+                        onBookmark,
+                        size = 42.dp,
+                        active = "${lesson.courseId}::${lesson.sectionId}" in state.bookmarkedSections
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    RoundActionButton(
+                        Icons.Rounded.Public,
+                        if (interactive) "מצב קריאה" else "גרסה אינטראקטיבית",
+                        { interactive = !interactive },
+                        size = 42.dp,
+                        active = interactive
+                    )
+                }
+            }
+
+            GlassSurface(
+                Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 10.dp).navigationBarsPadding().fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp)
+            ) {
+                Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RoundActionButton(Icons.Rounded.KeyboardArrowRight, "הקודם", onPrevious, size = 44.dp)
+                    Spacer(Modifier.weight(1f))
+                    Pressable(
+                        onClick = onCompleted,
+                        selected = "${lesson.courseId}/${lesson.chapterId}/${lesson.sectionId}" in state.completedSections,
+                        shape = CircleShape,
+                        contentPadding = 11.dp
+                    ) {
+                        Icon(Icons.Rounded.CheckCircle, null, tint = StudyBlue)
+                        Spacer(Modifier.width(7.dp))
+                        Text(if ("${lesson.courseId}/${lesson.chapterId}/${lesson.sectionId}" in state.completedSections) "הושלם" else "סיום שיעור")
+                    }
+                    Spacer(Modifier.weight(1f))
+                    RoundActionButton(Icons.Rounded.KeyboardArrowLeft, "הבא", onNext, size = 44.dp, active = lesson.nextSectionId != null)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatOverlay(
+    state: UiState,
+    onOpen: (Boolean) -> Unit,
+    onExpanded: (Boolean) -> Unit,
+    onInput: (String) -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (!state.chatOpen) {
+        RoundActionButton(
+            icon = Icons.Rounded.AutoAwesome,
+            contentDescription = "פתיחת Pythi",
+            onClick = { onOpen(true) },
+            modifier = modifier,
+            active = true,
+            size = 58.dp
+        )
+        return
+    }
+    AnimatedVisibility(
+        visible = state.chatOpen,
+        modifier = modifier,
+        enter = fadeIn() + scaleIn(initialScale = .82f),
+        exit = fadeOut() + scaleOut(targetScale = .82f)
+    ) {
+        GlassSurface(
+            Modifier
+                .fillMaxWidth()
+                .then(if (state.chatExpanded) Modifier.fillMaxSize().statusBarsPadding() else Modifier)
+                .imePadding()
+                .animateContentSize(spring(dampingRatio = .78f)),
+            shape = RoundedCornerShape(if (state.chatExpanded) 30.dp else 26.dp)
+        ) {
+            Column(Modifier.padding(10.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(38.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Pythi", fontWeight = FontWeight.ExtraBold)
+                        Text("עוזרת הלימוד שלך", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                    }
+                    IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי") }
+                    IconButton(onClick = { onExpanded(!state.chatExpanded) }) {
+                        Icon(if (state.chatExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess, "שינוי גודל")
+                    }
+                    IconButton(onClick = { onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
+                }
+                AnimatedVisibility(state.chatExpanded || state.chatMessages.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = if (state.chatExpanded) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().height(230.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(9.dp)
+                    ) {
+                        if (state.chatMessages.isEmpty()) {
+                            item {
+                                Text(
+                                    "אפשר לשאול על החומר, לבקש הסבר נוסף או תרגול.",
+                                    modifier = Modifier.fillMaxWidth().padding(22.dp),
+                                    textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        items(state.chatMessages, key = { it.id }) { message ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.role == "user") Arrangement.End else Arrangement.Start) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth(.88f)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .background(
+                                            when {
+                                                message.isError -> MaterialTheme.colorScheme.error.copy(.12f)
+                                                message.role == "user" -> StudyBlue
+                                                else -> MaterialTheme.colorScheme.surfaceVariant
+                                            }
+                                        )
+                                        .padding(14.dp)
+                                ) {
+                                    if (message.text.isBlank() && message.isStreaming) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    else Text(message.text, color = if (message.role == "user") Color.White else MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = state.chatInput,
+                        onValueChange = onInput,
+                        modifier = Modifier.weight(1f).animateContentSize(),
+                        placeholder = { Text("שאלו את Pythi…") },
+                        shape = RoundedCornerShape(24.dp),
+                        maxLines = if (state.chatExpanded) 5 else 2
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    RoundActionButton(
+                        icon = if (state.chatStreaming) Icons.Rounded.Stop else Icons.Rounded.Send,
+                        contentDescription = if (state.chatStreaming) "עצירה" else "שליחה",
+                        onClick = if (state.chatStreaming) onStop else onSend,
+                        active = true,
+                        size = 52.dp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AuthOverlay(
+    visible: Boolean,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onLogin: (String, String) -> Unit,
+    onRegister: (String, String, String) -> Unit
+) {
+    AnimatedVisibility(visible, enter = fadeIn() + scaleIn(initialScale = .9f), exit = fadeOut() + scaleOut(targetScale = .9f)) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(.64f)).statusBarsPadding().padding(18.dp), contentAlignment = Alignment.Center) {
+            var register by remember { mutableStateOf(false) }
+            var name by remember { mutableStateOf("") }
+            var email by remember { mutableStateOf("") }
+            var password by remember { mutableStateOf("") }
+            var showPassword by remember { mutableStateOf(false) }
+            GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp)) {
+                Column(Modifier.padding(22.dp).verticalScroll(rememberScrollState())) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(50.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Lock, null, tint = Color.White)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(if (register) "יצירת חשבון" else "ברוכים השבים", style = MaterialTheme.typography.headlineMedium)
+                            Text("ההתקדמות נשמרת ומסתנכרנת עם האתר", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "סגירה") }
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    if (register) {
+                        OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("שם") }, shape = RoundedCornerShape(22.dp), singleLine = true)
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("אימייל") }, shape = RoundedCornerShape(22.dp), singleLine = true)
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        password,
+                        { password = it },
+                        Modifier.fillMaxWidth(),
+                        label = { Text("סיסמה") },
+                        shape = RoundedCornerShape(22.dp),
+                        singleLine = true,
+                        visualTransformation = if (showPassword) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null)
+                            }
+                        }
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Pressable(
+                        onClick = { if (register) onRegister(name, email, password) else onLogin(email, password) },
+                        modifier = Modifier.fillMaxWidth(),
+                        selected = true,
+                        enabled = !loading
+                    ) {
+                        if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Text(if (register) "הרשמה" else "התחברות", color = StudyBlue, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { register = !register }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text(if (register) "כבר יש לי חשבון" else "אין לי חשבון — הרשמה")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminScreen(
+    state: UiState,
+    onClose: () -> Unit,
+    onReload: () -> Unit,
+    onToggleBlock: (String) -> Unit,
+    onAccess: (String, String) -> Unit,
+    onTogglePublic: (String) -> Unit,
+    onSettings: (Boolean, Boolean, Boolean) -> Unit
+) {
+    var tab by remember { mutableStateOf("overview") }
+    val tabs = listOf("overview" to "סקירה", "users" to "משתמשים", "requests" to "בקשות", "courses" to "קורסים", "settings" to "מערכת")
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "סגירה", onClose, size = 46.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("מרכז ניהול", style = MaterialTheme.typography.headlineMedium)
+                Text("שליטה מאובטחת במערכת", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            RoundActionButton(Icons.Rounded.Refresh, "רענון", onReload, size = 46.dp)
+        }
+        androidx.compose.foundation.lazy.LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(tabs.size) { index ->
+                val item = tabs[index]
+                Pressable(onClick = { tab = item.first }, selected = tab == item.first, shape = CircleShape, contentPadding = 11.dp) {
+                    Text(item.second, color = if (tab == item.first) StudyBlue else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        }
+        if (state.adminLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally).padding(28.dp))
+        when (tab) {
+            "overview" -> AdminOverviewContent(state)
+            "users" -> AdminUsersContent(state.adminUsers, onToggleBlock)
+            "requests" -> AdminRequestsContent(state.accessRequests, onAccess)
+            "courses" -> AdminCoursesContent(state, onTogglePublic)
+            "settings" -> AdminSettingsContent(state, onSettings)
+        }
+    }
+}
+
+@Composable
+private fun AdminOverviewContent(state: UiState) {
+    val overview = state.adminOverview
+    val metrics = listOf(
+        Triple("משתמשים", overview?.totalUsers ?: 0, Icons.Rounded.Group),
+        Triple("חסומים", overview?.blockedUsers ?: 0, Icons.Rounded.Lock),
+        Triple("בקשות", overview?.pendingRequests ?: 0, Icons.Rounded.Shield),
+        Triple("קורסים ציבוריים", overview?.publicCoursesCount ?: 0, Icons.Rounded.Public)
+    )
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 18.dp, 16.dp, 60.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(metrics) { metric ->
+            GlassSurface(Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(46.dp).clip(CircleShape).background(StudyBlue.copy(.14f)), contentAlignment = Alignment.Center) {
+                        Icon(metric.third, null, tint = StudyBlue)
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Text(metric.first, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Text(metric.second.toString(), style = MaterialTheme.typography.headlineMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminUsersContent(users: List<AdminUser>, onToggleBlock: (String) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val filtered = users.filter { query.isBlank() || it.email.contains(query, true) || it.displayName.contains(query, true) }
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 14.dp), placeholder = { Text("חיפוש משתמש") }, leadingIcon = { Icon(Icons.Rounded.Search, null) }, shape = RoundedCornerShape(22.dp))
+        LazyColumn(contentPadding = PaddingValues(vertical = 12.dp, horizontal = 0.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(filtered, key = { it.id }) { user ->
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).clip(CircleShape).background(StudyBlue.copy(.15f)), contentAlignment = Alignment.Center) {
+                            Text(user.displayName.ifBlank { user.email }.take(1).uppercase(), fontWeight = FontWeight.Bold, color = StudyBlue)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(user.displayName.ifBlank { user.email.substringBefore('@') }, fontWeight = FontWeight.Bold)
+                            Text(user.email, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        RoundActionButton(if (user.isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Lock, "חסימה", { onToggleBlock(user.id) }, size = 42.dp, active = user.isBlocked)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminRequestsContent(requests: List<AccessRequest>, onAccess: (String, String) -> Unit) {
+    if (requests.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("אין בקשות ממתינות", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(requests, key = { it.id }) { request ->
+            GlassSurface(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(request.userDisplayName.ifBlank { request.userEmail }, fontWeight = FontWeight.Bold)
+                    Text(request.userEmail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(request.courseTitle.ifBlank { request.courseId }, color = StudyBlue, modifier = Modifier.padding(vertical = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pressable(onClick = { onAccess(request.id, "approve") }, selected = true, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Rounded.Check, null, tint = StudyBlue)
+                            Text("אישור", color = StudyBlue)
+                        }
+                        Pressable(onClick = { onAccess(request.id, "reject") }, modifier = Modifier.weight(1f)) { Text("דחייה") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminCoursesContent(state: UiState, onToggle: (String) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(state.courses, key = { it.id }) { course ->
+            Pressable(onClick = { onToggle(course.id) }, modifier = Modifier.fillMaxWidth(), selected = course.id in state.publicCourseIds) {
+                Icon(if (course.id in state.publicCourseIds) Icons.Rounded.Public else Icons.Rounded.Lock, null, tint = if (course.id in state.publicCourseIds) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(12.dp))
+                Text(course.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                Switch(checked = course.id in state.publicCourseIds, onCheckedChange = { onToggle(course.id) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminSettingsContent(state: UiState, onSave: (Boolean, Boolean, Boolean) -> Unit) {
+    val overview = state.adminOverview ?: return
+    var password by remember(overview) { mutableStateOf(overview.requireCoursePassword) }
+    var gemini by remember(overview) { mutableStateOf(overview.geminiServerKeysEnabled) }
+    var explain by remember(overview) { mutableStateOf(overview.askPopoverShortExplainEnabled) }
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        GlassSurface(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp)) {
+                AdminToggle("דרישת הרשאת קורס", password) { password = it }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AdminToggle("מפתחות Gemini של השרת", gemini) { gemini = it }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AdminToggle("הסבר קצר בבחירה", explain) { explain = it }
+            }
+        }
+        Pressable(onClick = { onSave(password, gemini, explain) }, modifier = Modifier.fillMaxWidth(), selected = true) {
+            Text("שמירת הגדרות", color = StudyBlue, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun AdminToggle(title: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+        Switch(checked = checked, onCheckedChange = onChecked)
+    }
+}
+
+@Composable
+fun PdfOverlay(uri: Uri, onClose: () -> Unit) {
+    val context = LocalContext.current
+    var page by remember(uri) { mutableIntStateOf(0) }
+    val pageCount by produceState(initialValue = 0, uri) {
+        value = withContext(Dispatchers.IO) {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                PdfRenderer(descriptor).use { it.pageCount }
+            } ?: 0
+        }
+    }
+    val bitmap by produceState<Bitmap?>(initialValue = null, uri, page) {
+        value = withContext(Dispatchers.IO) {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    if (renderer.pageCount == 0) return@use null
+                    renderer.openPage(page.coerceIn(0, renderer.pageCount - 1)).use { pdfPage ->
+                        val width = 1440
+                        val height = (width * pdfPage.height.toFloat() / pdfPage.width).toInt().coerceAtLeast(1)
+                        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { target ->
+                            target.eraseColor(android.graphics.Color.WHITE)
+                            pdfPage.render(target, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        bitmap?.let {
+            Image(
+                it.asImageBitmap(),
+                null,
+                Modifier.fillMaxSize().padding(top = 78.dp, bottom = 90.dp),
+                contentScale = ContentScale.Fit
+            )
+        } ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
+        GlassSurface(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(10.dp).fillMaxWidth()) {
+            Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundActionButton(Icons.Rounded.Close, "סגירה", onClose, size = 42.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("קורא PDF", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                Text("${(page + 1).coerceAtMost(pageCount)} / $pageCount", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        GlassSurface(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(10.dp)) {
+            Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundActionButton(Icons.Rounded.KeyboardArrowRight, "עמוד קודם", { if (page > 0) page-- }, size = 44.dp)
+                Spacer(Modifier.width(24.dp))
+                Text("עמוד ${page + 1}", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(24.dp))
+                RoundActionButton(Icons.Rounded.KeyboardArrowLeft, "עמוד הבא", { if (page + 1 < pageCount) page++ }, size = 44.dp, active = page + 1 < pageCount)
+            }
+        }
+    }
+}
