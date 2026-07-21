@@ -123,6 +123,8 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
         onDispose { }
     }
 
+    val selectedCourse = state.selectedCourse
+
     BackHandler(enabled = state.adminOpen) { viewModel.closeAdmin() }
     BackHandler(enabled = pdfUri != null) { pdfUri = null }
     BackHandler(enabled = state.chatExpanded) { viewModel.setChatExpanded(false) }
@@ -142,11 +144,11 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
                 onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
                 onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) }
             )
-            state.selectedCourse != null -> CourseDetailScreen(
+            selectedCourse != null -> CourseDetailScreen(
                 state = state,
                 onBack = viewModel::closeCourse,
-                onLesson = { viewModel.openLesson(state.selectedCourse.id, it) },
-                onRequestAccess = { viewModel.requestCourseAccess(state.selectedCourse.id) }
+                onLesson = { viewModel.openLesson(selectedCourse.id, it) },
+                onRequestAccess = { viewModel.requestCourseAccess(selectedCourse.id) }
             )
             else -> AnimatedContent(targetState = state.rootTab, label = "rootTab") { tab ->
                 when (tab) {

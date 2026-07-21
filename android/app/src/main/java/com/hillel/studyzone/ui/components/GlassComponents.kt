@@ -17,10 +17,10 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -89,7 +89,7 @@ fun Pressable(
                 .clickable(
                     enabled = enabled,
                     interactionSource = interaction,
-                    indication = rememberRipple(bounded = true),
+                    indication = ripple(bounded = true),
                     onClick = onClick
                 )
                 .defaultMinSize(minHeight = 50.dp)
@@ -125,7 +125,7 @@ fun RoundActionButton(
             )
             .clickable(
                 interactionSource = interaction,
-                indication = rememberRipple(bounded = true),
+                indication = ripple(bounded = true),
                 onClick = onClick
             )
             .defaultMinSize(size, size),
