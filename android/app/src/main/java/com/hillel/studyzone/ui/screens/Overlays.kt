@@ -6,7 +6,14 @@ import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,7 +23,10 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,12 +37,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,7 +54,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
@@ -60,10 +73,10 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,6 +92,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -88,11 +102,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.Role
@@ -103,6 +125,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.material.icons.rounded.School
 import com.hillel.studyzone.model.AccessRequest
 import com.hillel.studyzone.model.AdminUser
 import com.hillel.studyzone.model.RootTab
@@ -117,6 +142,7 @@ import com.hillel.studyzone.ui.theme.StudyBlue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.math.hypot
 
 @Composable
 fun IntroSplash(visible: Boolean) {
@@ -127,7 +153,7 @@ fun IntroSplash(visible: Boolean) {
         if (visible) {
             appeared = true
             // Opening motion is decorative and never blocks an already-ready app for long.
-            delay(360)
+            delay(620)
             internallyVisible = false
         }
     }
@@ -146,6 +172,13 @@ fun IntroSplash(visible: Boolean) {
             animationSpec = androidx.compose.animation.core.tween(180),
             label = "introAlpha"
         )
+        val orbit = rememberInfiniteTransition(label = "introOrbit")
+        val orbitRotation by orbit.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing)),
+            label = "introOrbitRotation"
+        )
         Box(
             Modifier.fillMaxSize().background(
                 Brush.radialGradient(
@@ -157,10 +190,19 @@ fun IntroSplash(visible: Boolean) {
         ) {
             Box(
                 Modifier
-                    .size(138.dp)
-                    .graphicsLayer { scaleX = logoScale; scaleY = logoScale; alpha = contentAlpha }
+                    .size(146.dp)
+                    .graphicsLayer {
+                        scaleX = logoScale
+                        scaleY = logoScale
+                        alpha = contentAlpha
+                        rotationZ = orbitRotation
+                    }
                     .clip(CircleShape)
-                    .background(StudyBlue.copy(alpha = .08f))
+                    .background(
+                        Brush.sweepGradient(
+                            listOf(Color.Transparent, StudyBlue.copy(alpha = .42f), Color.Transparent)
+                        )
+                    )
             )
             Box(
                 Modifier
@@ -187,60 +229,138 @@ fun IntroSplash(visible: Boolean) {
     }
 }
 
+/** Circular palette reveal matching the website's theme transition without capturing a bitmap. */
+@Composable
+fun ThemeRevealOverlay(background: Color) {
+    var previousBackground by remember { mutableStateOf(background) }
+    var overlayColor by remember { mutableStateOf(background) }
+    val progress = remember { Animatable(1f) }
+    LaunchedEffect(background) {
+        if (background != previousBackground) {
+            overlayColor = previousBackground
+            previousBackground = background
+            progress.snapTo(0f)
+            progress.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+        }
+    }
+    if (progress.value < 1f) {
+        Canvas(
+            Modifier.fillMaxSize().graphicsLayer {
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
+        ) {
+            val origin = Offset(82.dp.toPx(), 56.dp.toPx())
+            val radius = hypot(size.width - origin.x, size.height - origin.y) * progress.value
+            drawRect(overlayColor)
+            drawCircle(Color.Transparent, radius = radius, center = origin, blendMode = BlendMode.Clear)
+        }
+    }
+}
+
 @Composable
 fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier = Modifier) {
     val tabs = listOf(
-        Triple(RootTab.COURSES, Icons.Rounded.AutoAwesome, "לימודים"),
+        Triple(RootTab.COURSES, Icons.Rounded.School, "לימודים"),
         Triple(RootTab.SEARCH, Icons.Rounded.Search, "חיפוש"),
         Triple(RootTab.SAVED, Icons.Rounded.BookmarkBorder, "שמורים"),
-        Triple(RootTab.TOOLS, Icons.Rounded.Settings, "כלים"),
         Triple(RootTab.PROFILE, Icons.Rounded.Group, "פרופיל")
     )
+    val activeIndex = tabs.indexOfFirst { it.first == active }.coerceAtLeast(0)
+    val direction = LocalLayoutDirection.current
+    val density = LocalDensity.current
+    var widthPx by remember { mutableIntStateOf(0) }
+    var dragging by remember { mutableStateOf(false) }
+    var pointerX by remember { mutableFloatStateOf(0f) }
+    val tabWidthPx = if (widthPx > 0) widthPx.toFloat() / tabs.size else 0f
+    val snappedPhysicalIndex = if (direction == LayoutDirection.Rtl) tabs.lastIndex - activeIndex else activeIndex
+    val targetX = if (dragging && tabWidthPx > 0f) {
+        (pointerX - tabWidthPx / 2f).coerceIn(0f, (widthPx - tabWidthPx).coerceAtLeast(0f))
+    } else {
+        snappedPhysicalIndex * tabWidthPx
+    }
+    val indicatorX by animateFloatAsState(
+        targetValue = targetX,
+        animationSpec = spring(stiffness = if (dragging) 1050f else 680f, dampingRatio = .82f),
+        label = "navIndicator"
+    )
+    val indicatorWidth = with(density) { tabWidthPx.toDp() }
     GlassSurface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp).navigationBarsPadding(),
         shape = RoundedCornerShape(30.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            tabs.forEach { item ->
-                val selected = active == item.first
-                val selectedFill by androidx.compose.animation.animateColorAsState(
-                    if (selected) StudyBlue.copy(.14f) else Color.Transparent,
-                    label = "navFill"
-                )
-                val iconScale by animateFloatAsState(
-                    if (selected) 1.08f else 1f,
-                    spring(stiffness = 760f, dampingRatio = .7f),
-                    label = "navIcon"
-                )
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .heightIn(min = 58.dp)
+        Box(
+            Modifier.fillMaxWidth().padding(6.dp).height(58.dp)
+                .onSizeChanged { widthPx = it.width }
+                .pointerInput(widthPx, direction, tabs) {
+                    if (widthPx <= 0) return@pointerInput
+                    var lastLogicalIndex = activeIndex
+                    fun selectAt(x: Float) {
+                        val physical = (x / (widthPx.toFloat() / tabs.size)).toInt().coerceIn(0, tabs.lastIndex)
+                        val logical = if (direction == LayoutDirection.Rtl) tabs.lastIndex - physical else physical
+                        if (logical != lastLogicalIndex) {
+                            lastLogicalIndex = logical
+                            onTab(tabs[logical].first)
+                        }
+                    }
+                    detectHorizontalDragGestures(
+                        onDragStart = { start ->
+                            dragging = true
+                            pointerX = start.x
+                            selectAt(start.x)
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            pointerX = change.position.x.coerceIn(0f, widthPx.toFloat())
+                            selectAt(pointerX)
+                            change.consume()
+                        },
+                        onDragEnd = { dragging = false },
+                        onDragCancel = { dragging = false }
+                    )
+                }
+        ) {
+            if (indicatorWidth > 0.dp) {
+                Box(
+                    Modifier.width(indicatorWidth).height(58.dp)
+                        .graphicsLayer { translationX = indicatorX }
                         .clip(RoundedCornerShape(22.dp))
-                        .background(selectedFill)
-                        .selectable(
-                            selected = selected,
-                            onClick = { onTab(item.first) },
-                            role = Role.Tab
+                        .background(StudyBlue.copy(alpha = .15f))
+                )
+            }
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceAround) {
+                tabs.forEach { item ->
+                    val selected = active == item.first
+                    val iconScale by animateFloatAsState(
+                        if (selected) 1.08f else 1f,
+                        spring(stiffness = 760f, dampingRatio = .7f),
+                        label = "navIcon"
+                    )
+                    Column(
+                        Modifier.weight(1f).height(58.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .selectable(
+                                selected = selected,
+                                onClick = { onTab(item.first) },
+                                role = Role.Tab
+                            )
+                            .padding(horizontal = 2.dp, vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            item.second,
+                            item.third,
+                            modifier = Modifier.size(23.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                            tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        .padding(horizontal = 2.dp, vertical = 7.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        item.second,
-                        item.third,
-                        modifier = Modifier.size(23.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
-                        tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        item.third,
-                        color = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            item.third,
+                            color = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -268,7 +388,7 @@ fun LessonScreen(
                     shape = RoundedCornerShape(26.dp)
                 ) {
                     Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "חזרה", onBack, size = 42.dp)
+                        RoundActionButton(Icons.AutoMirrored.Rounded.ArrowBack, "חזרה", onBack, size = 42.dp)
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(lesson.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -420,7 +540,7 @@ fun ChatOverlay(
 ) {
     if (!state.chatOpen) {
         RoundActionButton(
-            icon = Icons.Rounded.AutoAwesome,
+            icon = Icons.Rounded.SmartToy,
             contentDescription = "פתיחת Pythi",
             onClick = { onOpen(true) },
             modifier = modifier,
@@ -431,126 +551,158 @@ fun ChatOverlay(
     }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(state.chatOpen) {
-        if (state.chatOpen) {
-            delay(90)
-            runCatching { focusRequester.requestFocus() }
-            keyboard?.show()
+    val focusManager = LocalFocusManager.current
+    val dismissKeyboard = remember(keyboard, focusManager) {
+        {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
         }
     }
-    AnimatedVisibility(
-        visible = state.chatOpen,
-        modifier = modifier,
-        enter = fadeIn() + scaleIn(initialScale = .9f) + slideInVertically(initialOffsetY = { it / 5 }),
-        exit = fadeOut() + scaleOut(targetScale = .94f) + slideOutVertically(targetOffsetY = { it / 6 })
-    ) {
-        GlassSurface(
-            Modifier
-                .widthIn(max = 720.dp)
-                .fillMaxWidth()
-                .then(
-                    if (state.chatExpanded) {
-                        Modifier.fillMaxSize().statusBarsPadding()
-                    } else {
-                        Modifier.heightIn(min = 230.dp, max = 520.dp)
-                    }
-                )
-                .navigationBarsPadding()
-                .imePadding()
-                .animateContentSize(spring(dampingRatio = .86f, stiffness = 520f)),
-            shape = RoundedCornerShape(if (state.chatExpanded) 32.dp else 28.dp)
+    Box(modifier.imePadding().navigationBarsPadding()) {
+        Box(
+            Modifier.matchParentSize().clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = dismissKeyboard
+            )
+        )
+        AnimatedVisibility(
+            visible = state.chatOpen,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 8.dp, vertical = 6.dp),
+            enter = fadeIn() + scaleIn(initialScale = .94f) + slideInVertically(initialOffsetY = { it / 4 }),
+            exit = fadeOut() + scaleOut(targetScale = .96f) + slideOutVertically(targetOffsetY = { it / 5 })
         ) {
-            Column(Modifier.padding(12.dp)) {
-                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(42.dp).clip(CircleShape).background(StudyBlue), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(21.dp))
+            GlassSurface(
+                Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                    .then(
+                        if (state.chatExpanded) Modifier.fillMaxSize().statusBarsPadding()
+                        else Modifier.heightIn(min = 360.dp, max = 560.dp)
+                    )
+                    .animateContentSize(spring(dampingRatio = .88f, stiffness = 560f)),
+                shape = RoundedCornerShape(if (state.chatExpanded) 32.dp else 30.dp)
+            ) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                    Box(
+                        Modifier.align(Alignment.CenterHorizontally).width(46.dp).height(5.dp)
+                            .clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant)
+                            .clickable { onExpanded(!state.chatExpanded) }
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(StudyBlue), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.SmartToy, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            Box(
+                                Modifier.align(Alignment.BottomEnd).size(10.dp).clip(CircleShape)
+                                    .background(Color(0xFF31C76A))
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Pythi", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                if (state.chatStreaming) "כותבת תשובה…" else "עוזרת לימודית",
+                                color = if (state.chatStreaming) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                        if (state.chatMessages.isNotEmpty()) {
+                            IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי השיחה") }
+                        }
+                        IconButton(onClick = { onExpanded(!state.chatExpanded) }) {
+                            Icon(
+                                if (state.chatExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
+                                if (state.chatExpanded) "הקטנת הצ׳אט" else "הרחבת הצ׳אט"
+                            )
+                        }
+                        IconButton(onClick = { dismissKeyboard(); onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
                     }
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Pythi", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (state.chatStreaming) "כותבת תשובה…" else "עוזרת הלימוד שלך",
-                            color = if (state.chatStreaming) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                    if (state.chatMessages.isNotEmpty()) {
-                        IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי השיחה") }
-                    }
-                    IconButton(onClick = { onExpanded(!state.chatExpanded) }) {
-                        Icon(
-                            if (state.chatExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
-                            if (state.chatExpanded) "הקטנת הצ׳אט" else "הרחבת הצ׳אט"
-                        )
-                    }
-                    IconButton(onClick = { onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
-                }
 
-                if (state.chatMessages.isEmpty()) {
-                    Column(
-                        Modifier.fillMaxWidth().then(if (state.chatExpanded) Modifier.weight(1f) else Modifier)
-                            .padding(horizontal = 14.dp, vertical = 18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Box(Modifier.size(58.dp).clip(CircleShape).background(StudyBlue.copy(.12f)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.AutoAwesome, null, tint = StudyBlue, modifier = Modifier.size(26.dp))
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Text("מה לומדים היום?", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            "אפשר לבקש הסבר, תרגול או פתרון מסודר עם נוסחאות.",
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            items(listOf("הסבר פשוט", "תרגיל לדוגמה", "סיכום קצר")) { suggestion ->
-                                Pressable(
-                                    onClick = { onInput(suggestion) },
-                                    shape = CircleShape,
-                                    contentPadding = 9.dp
-                                ) { Text(suggestion, style = MaterialTheme.typography.labelMedium) }
-                            }
-                        }
-                    }
-                } else {
-                    ChatRichText(
-                        messages = state.chatMessages,
-                        modifier = if (state.chatExpanded) {
+                    if (state.chatMessages.isEmpty()) {
+                        Column(
                             Modifier.fillMaxWidth().weight(1f)
-                        } else {
-                            Modifier.fillMaxWidth().height(270.dp)
+                                .clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = dismissKeyboard
+                                )
+                                .padding(horizontal = 14.dp, vertical = 14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(Modifier.size(62.dp).clip(RoundedCornerShape(20.dp)).background(StudyBlue.copy(.12f)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.SmartToy, null, tint = StudyBlue, modifier = Modifier.size(31.dp))
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Text("איך אפשר לעזור היום?", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "אפשר לבקש הסבר, תרגול או פתרון מסודר עם נוסחאות.",
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                items(listOf("הסבר פשוט", "תרגיל לדוגמה", "סיכום קצר")) { suggestion ->
+                                    Pressable(
+                                        onClick = { onInput(suggestion); focusRequester.requestFocus(); keyboard?.show() },
+                                        shape = CircleShape,
+                                        contentPadding = 9.dp
+                                    ) { Text(suggestion, style = MaterialTheme.typography.labelMedium) }
+                                }
+                            }
                         }
-                    )
-                }
+                    } else {
+                        ChatRichText(
+                            messages = state.chatMessages,
+                            onTap = dismissKeyboard,
+                            modifier = Modifier.fillMaxWidth().weight(1f)
+                        )
+                    }
 
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.Bottom) {
-                    OutlinedTextField(
-                        value = state.chatInput,
-                        onValueChange = onInput,
-                        modifier = Modifier.weight(1f).focusRequester(focusRequester),
-                        placeholder = { Text("שאלו את Pythi…") },
-                        shape = RoundedCornerShape(24.dp),
-                        minLines = 1,
-                        maxLines = if (state.chatExpanded) 6 else 3,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
-                                if (!state.chatStreaming && state.chatInput.isNotBlank()) onSend()
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .border(
+                                1.dp,
+                                if (state.chatInput.isNotBlank()) StudyBlue.copy(alpha = .55f) else MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(28.dp)
+                            )
+                            .padding(start = 6.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = state.chatInput,
+                            onValueChange = onInput,
+                            modifier = Modifier.weight(1f).heightIn(min = 42.dp, max = if (state.chatExpanded) 150.dp else 104.dp)
+                                .focusRequester(focusRequester),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(StudyBlue),
+                            minLines = 1,
+                            maxLines = if (state.chatExpanded) 6 else 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = { if (!state.chatStreaming && state.chatInput.isNotBlank()) onSend() }
+                            ),
+                            decorationBox = { inner ->
+                                Box(Modifier.fillMaxWidth().padding(vertical = 9.dp), contentAlignment = Alignment.CenterStart) {
+                                    if (state.chatInput.isBlank()) {
+                                        Text("שאלו את Pythi…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    inner()
+                                }
                             }
                         )
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    RoundActionButton(
-                        icon = if (state.chatStreaming) Icons.Rounded.Stop else Icons.Rounded.Send,
-                        contentDescription = if (state.chatStreaming) "עצירה" else "שליחה",
-                        onClick = if (state.chatStreaming) onStop else onSend,
-                        active = state.chatStreaming || state.chatInput.isNotBlank(),
-                        size = 52.dp,
-                        enabled = state.chatStreaming || state.chatInput.isNotBlank()
-                    )
+                        Spacer(Modifier.width(7.dp))
+                        RoundActionButton(
+                            icon = if (state.chatStreaming) Icons.Rounded.Stop else Icons.AutoMirrored.Rounded.Send,
+                            contentDescription = if (state.chatStreaming) "עצירה" else "שליחה",
+                            onClick = if (state.chatStreaming) onStop else onSend,
+                            active = state.chatStreaming || state.chatInput.isNotBlank(),
+                            size = 44.dp,
+                            enabled = state.chatStreaming || state.chatInput.isNotBlank()
+                        )
+                    }
                 }
             }
         }
@@ -630,7 +782,7 @@ fun AuthOverlay(
 }
 
 @Composable
-fun AdminScreen(
+private fun LegacyAdminScreen(
     state: UiState,
     onClose: () -> Unit,
     onReload: () -> Unit,
@@ -649,7 +801,7 @@ fun AdminScreen(
             .navigationBarsPadding()
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "סגירה", onClose, size = 46.dp)
+            RoundActionButton(Icons.AutoMirrored.Rounded.ArrowBack, "סגירה", onClose, size = 46.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("מרכז ניהול", style = MaterialTheme.typography.headlineMedium)

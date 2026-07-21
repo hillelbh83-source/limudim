@@ -6,12 +6,15 @@ import com.hillel.studyzone.BuildConfig
 import com.hillel.studyzone.model.AccessRequest
 import com.hillel.studyzone.model.AdminOverview
 import com.hillel.studyzone.model.AdminUser
+import com.hillel.studyzone.model.AdminUserDetails
 import com.hillel.studyzone.model.Chapter
 import com.hillel.studyzone.model.Course
 import com.hillel.studyzone.model.Lesson
 import com.hillel.studyzone.model.SearchResult
 import com.hillel.studyzone.model.Section
 import com.hillel.studyzone.model.User
+import com.hillel.studyzone.model.GeminiServerKey
+import com.hillel.studyzone.model.SystemPasswordStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -82,7 +85,9 @@ class StudyZoneApi(context: Context) {
         val overview: AdminOverview,
         val users: List<AdminUser>,
         val requests: List<AccessRequest>,
-        val publicCourseIds: Set<String>
+        val publicCourseIds: Set<String>,
+        val geminiKeys: List<GeminiServerKey>,
+        val passwords: List<SystemPasswordStatus>
     )
 
     /**
@@ -238,14 +243,52 @@ class StudyZoneApi(context: Context) {
             val users = async { requestJson("/admin/users?page=1&limit=200") }
             val requests = async { requestJson("/admin/course-access?status=pending&page=1&limit=300") }
             val publicCourses = async { requestJson("/admin/courses/public") }
+            val geminiKeys = async { requestJson("/admin/gemini/server-keys") }
+            val passwords = async { requestJson("/admin/system/passwords") }
             val overviewBody = overview.await()
             AdminData(
                 overview = (overviewBody.optJSONObject("summary") ?: overviewBody).toAdminOverview(),
                 users = users.await().optJSONArray("users").toAdminUsers(apiBase),
                 requests = requests.await().optJSONArray("requests").toAccessRequests(),
-                publicCourseIds = publicCourses.await().optJSONArray("publicCourseIds").toStringSet()
+                publicCourseIds = publicCourses.await().optJSONArray("publicCourseIds").toStringSet(),
+                geminiKeys = geminiKeys.await().optJSONArray("keys").toGeminiKeys(),
+                passwords = passwords.await().toSystemPasswords()
             )
         }
+    }
+
+    suspend fun loadAdminUser(userId: String): AdminUserDetails = withContext(Dispatchers.IO) {
+        requestJson("/admin/users/${encode(userId)}").toAdminUserDetails(apiBase)
+    }
+
+    suspend fun loadAccessRequests(status: String): List<AccessRequest> = withContext(Dispatchers.IO) {
+        requestJson("/admin/course-access?status=${encode(status)}&page=1&limit=300")
+            .optJSONArray("requests").toAccessRequests()
+    }
+
+    suspend fun deleteAdminUser(userId: String) = withContext(Dispatchers.IO) {
+        deleteJson("/admin/users/${encode(userId)}")
+        Unit
+    }
+
+    suspend fun sendAdminMessage(
+        targetUserId: String,
+        subject: String,
+        content: String,
+        sendViaEmail: Boolean,
+        sendViaInApp: Boolean
+    ) = withContext(Dispatchers.IO) {
+        postJson(
+            "/admin/messages/send",
+            JSONObject()
+                .put("targetUserId", targetUserId)
+                .put("subject", subject)
+                .put("content", content)
+                .put("isHtml", false)
+                .put("sendViaEmail", sendViaEmail)
+                .put("sendViaInApp", sendViaInApp)
+        )
+        Unit
     }
 
     suspend fun toggleUserBlock(userId: String): Boolean = withContext(Dispatchers.IO) {
@@ -262,10 +305,16 @@ class StudyZoneApi(context: Context) {
             .optJSONArray("publicCourseIds").toStringSet()
     }
 
+    suspend fun clearPublicCourses() = withContext(Dispatchers.IO) {
+        postJson("/admin/courses/public/clear", JSONObject())
+        Unit
+    }
+
     suspend fun updateSystemSettings(
         requireCoursePassword: Boolean,
         geminiServerKeysEnabled: Boolean,
-        shortExplainEnabled: Boolean
+        shortExplainEnabled: Boolean,
+        pythiChatModel: String
     ) = withContext(Dispatchers.IO) {
         postJson(
             "/admin/system/settings",
@@ -273,8 +322,52 @@ class StudyZoneApi(context: Context) {
                 .put("requireCoursePassword", requireCoursePassword)
                 .put("geminiServerKeysEnabled", geminiServerKeysEnabled)
                 .put("askPopoverShortExplainEnabled", shortExplainEnabled)
+                .put("pythiChatModel", pythiChatModel)
         )
         Unit
+    }
+
+    suspend fun createGeminiKey(label: String, apiKey: String): List<GeminiServerKey> = withContext(Dispatchers.IO) {
+        postJson(
+            "/admin/gemini/server-keys",
+            JSONObject().put("label", label).put("apiKey", apiKey).put("enabled", true)
+        ).optJSONArray("keys").toGeminiKeys()
+    }
+
+    suspend fun updateGeminiKey(
+        keyId: String,
+        label: String,
+        apiKey: String?,
+        enabled: Boolean
+    ): List<GeminiServerKey> = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("label", label).put("enabled", enabled)
+        if (!apiKey.isNullOrBlank()) body.put("apiKey", apiKey)
+        postJson("/admin/gemini/server-keys/${encode(keyId)}", body)
+            .optJSONArray("keys").toGeminiKeys()
+    }
+
+    suspend fun clearGeminiCooldown(keyId: String): List<GeminiServerKey> = withContext(Dispatchers.IO) {
+        postJson("/admin/gemini/server-keys/${encode(keyId)}/cooldown/clear", JSONObject())
+            .optJSONArray("keys").toGeminiKeys()
+    }
+
+    suspend fun deleteGeminiKey(keyId: String): List<GeminiServerKey> = withContext(Dispatchers.IO) {
+        deleteJson("/admin/gemini/server-keys/${encode(keyId)}")
+            .optJSONArray("keys").toGeminiKeys()
+    }
+
+    suspend fun updateSystemPassword(type: String, password: String): List<SystemPasswordStatus> = withContext(Dispatchers.IO) {
+        postJson("/admin/system/passwords", JSONObject().put("type", type).put("password", password))
+        requestJson("/admin/system/passwords").toSystemPasswords()
+    }
+
+    suspend fun exportGeminiKeys(): String = withContext(Dispatchers.IO) {
+        val request = baseRequest(apiRoot + "/admin/gemini/server-keys/export").get().build()
+        client.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw apiError(raw, response.code)
+            raw
+        }
     }
 
     fun streamChat(
@@ -472,6 +565,11 @@ class StudyZoneApi(context: Context) {
         val builder = baseRequest(apiRoot + path).post(body.toString().toRequestBody(jsonType))
         headers.forEach { (name, value) -> builder.header(name, value) }
         return executeJson(builder.build())
+    }
+
+    private fun deleteJson(path: String): JSONObject {
+        val request = baseRequest(apiRoot + path).delete().build()
+        return executeJson(request)
     }
 
     private fun baseRequest(url: String): Request.Builder = Request.Builder()
@@ -754,7 +852,10 @@ private fun JSONObject.toAdminOverview() = AdminOverview(
     requireCoursePassword = optBoolean("requireCoursePassword", true),
     geminiServerKeysEnabled = optBoolean("geminiServerKeysEnabled", true),
     askPopoverShortExplainEnabled = optBoolean("askPopoverShortExplainEnabled", false),
-    pythiChatModel = optString("pythiChatModel")
+    pythiChatModel = optString("pythiChatModel"),
+    geminiServerKeysTotal = optInt("geminiServerKeysTotal"),
+    geminiServerKeysActive = optInt("geminiServerKeysActive"),
+    geminiServerKeysCooldown = optInt("geminiServerKeysCooldown")
 )
 
 private fun JSONArray?.toAdminUsers(apiBase: String): List<AdminUser> = buildList {
@@ -769,6 +870,8 @@ private fun JSONArray?.toAdminUsers(apiBase: String): List<AdminUser> = buildLis
                 isBlocked = item.optBoolean("isBlocked"),
                 isVerified = item.optBoolean("isVerified", true),
                 createdAt = item.optLongOrNull("createdAt"),
+                lastLoginAt = item.optLongOrNull("lastLoginAt"),
+                isGoogle = item.optBoolean("isGoogle"),
                 photoUrl = item.optNullableString("photoURL")?.let {
                     if (it.startsWith("/")) apiBase + it else it
                 }
@@ -784,13 +887,91 @@ private fun JSONArray?.toAccessRequests(): List<AccessRequest> = buildList {
         add(
             AccessRequest(
                 id = item.optString("id"),
+                userId = item.optString("userId"),
                 userEmail = item.optString("userEmail"),
                 userDisplayName = item.optString("userDisplayName"),
                 courseId = item.optString("courseId"),
                 courseTitle = item.optString("courseTitle"),
-                status = item.optString("status")
+                status = item.optString("status"),
+                createdAt = item.optLongOrNull("createdAt"),
+                updatedAt = item.optLongOrNull("updatedAt")
             )
         )
+    }
+}
+
+private fun JSONObject.toAdminUserDetails(apiBase: String): AdminUserDetails {
+    val profile = optJSONObject("profile") ?: JSONObject()
+    val courseAccess = optJSONObject("courseAccess") ?: JSONObject()
+    val metricsObject = optJSONObject("metrics") ?: JSONObject()
+    val metrics = buildMap {
+        metricsObject.keys().forEach { key -> put(key, metricsObject.optInt(key)) }
+    }
+    val rawPhoto = profile.optNullableString("photoURL")
+    val photo = rawPhoto?.let { if (it.startsWith("/")) apiBase + it else it }
+    return AdminUserDetails(
+        userId = optString("userId"),
+        email = profile.optString("email"),
+        displayName = profile.optString("displayName"),
+        photoUrl = photo,
+        isGoogle = profile.optBoolean("isGoogle"),
+        isVerified = profile.optBoolean("isVerified", true),
+        isBlocked = profile.optBoolean("isBlocked"),
+        createdAt = profile.optLongOrNull("createdAt"),
+        lastLoginAt = profile.optLongOrNull("lastLoginAt"),
+        achievementsCount = optInt("achievementsCount"),
+        apiKeysCount = optJSONArray("apiKeys")?.length() ?: 0,
+        metrics = metrics,
+        allowedCourseIds = courseAccess.optJSONArray("allowedCourseIds").toStringList(),
+        pendingCourseIds = courseAccess.optJSONArray("pendingCourseIds").toStringList(),
+        deniedCourseIds = courseAccess.optJSONArray("deniedCourseIds").toStringList()
+    )
+}
+
+private fun JSONArray?.toGeminiKeys(): List<GeminiServerKey> = buildList {
+    val array = this@toGeminiKeys ?: return@buildList
+    for (index in 0 until array.length()) {
+        val item = array.optJSONObject(index) ?: continue
+        add(
+            GeminiServerKey(
+                id = item.optString("id"),
+                label = item.optString("label"),
+                maskedKey = item.optString("maskedKey"),
+                enabled = item.optBoolean("enabled", true),
+                state = item.optString("state"),
+                createdAt = item.optLongOrNull("createdAt"),
+                updatedAt = item.optLongOrNull("updatedAt"),
+                remainingCooldownMs = item.optLong("remainingCooldownMs", 0L),
+                lastFailureMessage = item.optString("lastFailureMessage"),
+                lastFailureRoute = item.optString("lastFailureRoute"),
+                lastFailureModel = item.optString("lastFailureModel"),
+                lastFailureStatus = item.opt("lastFailureStatus").let { value ->
+                    when (value) {
+                        is Number -> value.toInt()
+                        is String -> value.toIntOrNull()
+                        else -> null
+                    }
+                }
+            )
+        )
+    }
+}
+
+private fun JSONObject.toSystemPasswords(): List<SystemPasswordStatus> {
+    val statuses = optJSONObject("passwords") ?: JSONObject()
+    val labels = optJSONObject("labels") ?: JSONObject()
+    return buildList {
+        statuses.keys().forEach { type ->
+            val status = statuses.optJSONObject(type)
+            add(
+                SystemPasswordStatus(
+                    type = type,
+                    label = labels.optString(type).ifBlank { type },
+                    configured = status?.optBoolean("configured") ?: statuses.optBoolean(type),
+                    hashed = status?.optBoolean("hashed") ?: false
+                )
+            )
+        }
     }
 }
 
@@ -813,6 +994,13 @@ private fun JSONObject.optLongOrNull(key: String): Long? {
 
 private fun JSONArray?.toStringSet(): Set<String> = buildSet {
     val array = this@toStringSet ?: return@buildSet
+    for (index in 0 until array.length()) {
+        array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+    }
+}
+
+private fun JSONArray?.toStringList(): List<String> = buildList {
+    val array = this@toStringList ?: return@buildList
     for (index in 0 until array.length()) {
         array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
     }

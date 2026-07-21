@@ -88,6 +88,8 @@ jobs:
           assert joined_lessons.count('**הסבר:**') >= 917, 'Native question explanations are incomplete'
           assert joined_lessons.count('**תשובה:**') >= 48, 'Dapar answer set is incomplete'
           assert (assets / 'katex/katex.min.js').stat().st_size > 200_000, 'Offline KaTeX bundle is missing'
+          assert (assets / 'katex/katex.min.css').stat().st_size > 20_000, 'KaTeX visual stylesheet is missing'
+          assert len(list((assets / 'katex/fonts').glob('*.woff2'))) >= 20, 'KaTeX font set is incomplete'
           assert (assets / 'katex/LICENSE').is_file(), 'KaTeX license notice is missing'
           print(f'Validated {len(courses)} courses and {resolved} native lesson routes')
           PY

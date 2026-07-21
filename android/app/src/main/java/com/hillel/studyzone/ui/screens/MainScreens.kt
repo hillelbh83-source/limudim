@@ -1,8 +1,16 @@
 package com.hillel.studyzone.ui.screens
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -12,10 +20,11 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,7 +49,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -86,6 +95,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +118,7 @@ fun CoursesScreen(
     state: UiState,
     onCourse: (Course) -> Unit,
     onProfile: () -> Unit,
+    darkMode: Boolean,
     onThemeToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -161,7 +172,7 @@ fun CoursesScreen(
                 }
                 Spacer(Modifier.width(10.dp))
                 RoundActionButton(
-                    icon = if (state.settings.themeMode == ThemeMode.DARK) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+                    icon = if (darkMode) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
                     contentDescription = "החלפת ערכת צבעים",
                     onClick = onThemeToggle,
                     size = 46.dp
@@ -212,7 +223,7 @@ fun CoursesScreen(
 
         Spacer(Modifier.height(16.dp))
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(174.dp),
+            columns = GridCells.Adaptive(292.dp),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 136.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -243,12 +254,14 @@ fun CoursesScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Unit) {
     val sectionCount = course.chapters.sumOf { it.sections.size }
     val completedCount = completed.count { it.startsWith("${course.id}/") }.coerceAtMost(sectionCount)
     val targetProgress = if (sectionCount == 0) 0f else completedCount.toFloat() / sectionCount
     val progress by animateFloatAsState(targetProgress, spring(stiffness = 700f, dampingRatio = .82f), label = "courseProgress")
     val icon = courseIcon(course.iconId)
+    val progressPercent = (progress * 100).toInt().coerceIn(0, 100)
 
     Pressable(
         onClick = onClick,
@@ -258,75 +271,88 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
         // understand the restriction and request access there.
         enabled = true
     ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val compact = maxWidth < 230.dp
-            if (compact) {
-                Column(
-                    Modifier.fillMaxWidth().heightIn(min = 224.dp).padding(16.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    CourseCardTop(course, icon, sectionCount)
-                    Column {
-                        Text(course.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            course.description,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(13.dp))
-                        CourseProgress(progress, completedCount, sectionCount)
-                    }
-                }
-            } else {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 166.dp).padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CourseIcon(icon, 54.dp)
-                    Spacer(Modifier.width(16.dp))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                course.title,
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.titleLarge,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text("${course.chapters.size} פרקים", color = StudyBlue, style = MaterialTheme.typography.labelMedium)
-                        }
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            course.description,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(13.dp))
-                        CourseProgress(progress, completedCount, sectionCount)
-                    }
+        Column(
+            Modifier.fillMaxWidth().heightIn(min = 310.dp).padding(22.dp),
+            verticalArrangement = Arrangement.Top
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                CourseIcon(icon, 58.dp)
+                Spacer(Modifier.weight(1f))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$progressPercent%", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text("הושלם", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                 }
             }
+            Spacer(Modifier.height(20.dp))
+            Text(course.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(9.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.weight(1f).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 11.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        "${course.chapters.size} פרקים · $sectionCount שיעורים",
+                        modifier = Modifier.fillMaxWidth().basicMarquee(
+                            iterations = Int.MAX_VALUE,
+                            initialDelayMillis = 900,
+                            repeatDelayMillis = 500
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1
+                    )
+                }
+                Box(
+                    Modifier.clip(CircleShape)
+                        .background(if (course.isAvailable) StudyBlue.copy(alpha = .12f) else MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 10.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        if (course.isAvailable) "פתוח" else "בפיתוח",
+                        color = if (course.isAvailable) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                course.description,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.weight(1f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        !course.isAvailable -> "פרטים ובקשת גישה"
+                        progressPercent == 100 -> "הקורס הושלם"
+                        progressPercent > 0 -> "המשך ללמוד"
+                        else -> "התחלת הקורס"
+                    },
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Box(
+                    Modifier.size(42.dp).clip(CircleShape)
+                        .background(if (progressPercent > 0) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (progressPercent == 100) Icons.Rounded.CheckCircle else Icons.Rounded.ChevronLeft,
+                        null,
+                        tint = if (progressPercent > 0) Color.White else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            CourseProgress(progress, completedCount, sectionCount)
         }
-    }
-}
-
-@Composable
-private fun CourseCardTop(course: Course, icon: ImageVector, sectionCount: Int) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        CourseIcon(icon, 46.dp)
-        Spacer(Modifier.weight(1f))
-        Text(
-            "${course.chapters.size} פרקים · $sectionCount שיעורים",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
@@ -397,7 +423,7 @@ fun CourseDetailScreen(
     ) {
         item {
             Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "חזרה", onBack, size = 46.dp)
+                RoundActionButton(Icons.AutoMirrored.Rounded.ArrowBack, "חזרה", onBack, size = 46.dp)
                 Spacer(Modifier.weight(1f))
                 if (!course.isAvailable) {
                     RoundActionButton(Icons.Rounded.Lock, "בקשת גישה לקורס", onRequestAccess, size = 46.dp)
@@ -553,24 +579,73 @@ fun SearchScreen(state: UiState, onQuery: (String) -> Unit, onResult: (String, S
             shape = RoundedCornerShape(26.dp),
             singleLine = true
         )
-        Spacer(Modifier.height(14.dp))
-        if (state.searchLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally).padding(24.dp))
-        if (!state.searchLoading && state.searchQuery.length >= 2 && state.searchResults.isEmpty()) {
-            EmptyState(Icons.Rounded.Search, "לא מצאנו תוצאה", "נסו ניסוח קצר או שם של קורס")
+        Spacer(Modifier.height(10.dp))
+        val normalizedQuery = state.searchQuery.trim()
+        val phase = when {
+            normalizedQuery.length < 2 -> "idle"
+            state.searchLoading || state.searchSettledQuery != normalizedQuery -> "loading"
+            state.searchResults.isEmpty() -> "empty"
+            else -> "results"
         }
-        LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(state.searchResults, key = { "${it.courseId}-${it.sectionId}" }) { result ->
-                Pressable(onClick = { onResult(result.courseId, result.sectionId) }, modifier = Modifier.fillMaxWidth(), contentPadding = 16.dp) {
-                    Column(Modifier.weight(1f)) {
-                        Text(result.title, style = MaterialTheme.typography.titleMedium)
-                        Text("${result.courseTitle} · ${result.sectionId}", color = StudyBlue, style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.height(7.dp))
-                        Text(result.snippet, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        AnimatedContent(
+            targetState = phase,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            transitionSpec = {
+                (fadeIn(tween(220)) + slideInVertically { it / 14 }) togetherWith fadeOut(tween(120))
+            },
+            label = "searchPhase"
+        ) { currentPhase ->
+            when (currentPhase) {
+                "idle" -> EmptyState(Icons.Rounded.Search, "מחפשים בכל השיעורים", "כתבו לפחות שתי אותיות ונמצא את המקום המדויק")
+                "loading" -> SearchLoadingAnimation(normalizedQuery)
+                "empty" -> EmptyState(Icons.Rounded.Search, "לא מצאנו תוצאה", "נסו ניסוח קצר או שם של קורס")
+                else -> LazyColumn(
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 130.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(state.searchResults, key = { "${it.courseId}-${it.sectionId}" }) { result ->
+                        Pressable(onClick = { onResult(result.courseId, result.sectionId) }, modifier = Modifier.fillMaxWidth(), contentPadding = 16.dp) {
+                            Column(Modifier.weight(1f)) {
+                                Text(result.title, style = MaterialTheme.typography.titleMedium)
+                                Text("${result.courseTitle} · ${result.sectionId}", color = StudyBlue, style = MaterialTheme.typography.labelMedium)
+                                Spacer(Modifier.height(7.dp))
+                                Text(result.snippet, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            }
+                            Icon(Icons.Rounded.ChevronLeft, null)
+                        }
                     }
-                    Icon(Icons.Rounded.ChevronLeft, null)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SearchLoadingAnimation(query: String) {
+    val infinite = rememberInfiniteTransition(label = "searchPulse")
+    val pulse by infinite.animateFloat(
+        initialValue = .72f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(720, easing = LinearEasing), RepeatMode.Reverse),
+        label = "searchPulseScale"
+    )
+    Column(
+        Modifier.fillMaxSize().padding(bottom = 92.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            Modifier.size(82.dp).graphicsLayer { scaleX = pulse; scaleY = pulse }
+                .clip(CircleShape).background(StudyBlue.copy(alpha = .12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(Modifier.size(56.dp).clip(CircleShape).background(StudyBlue.copy(alpha = .16f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Search, null, tint = StudyBlue, modifier = Modifier.size(26.dp))
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("מחפשים ״$query״", style = MaterialTheme.typography.titleMedium)
+        Text("עוברים על הקורסים והשיעורים…", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -70,9 +70,11 @@ fun GlassSurface(
 ) {
     val background by animateColorAsState(
         targetValue = if (selected) {
-            StudyBlue.copy(alpha = .13f)
+            StudyBlue.copy(alpha = .16f)
         } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = .96f)
+            // Translucency keeps the floating hierarchy visible in both palettes without the
+            // continuous blur render cost that made the first version stutter while scrolling.
+            MaterialTheme.colorScheme.surface.copy(alpha = .86f)
         },
         animationSpec = spring(stiffness = 900f, dampingRatio = .9f),
         label = "glassBackground"
@@ -81,7 +83,7 @@ fun GlassSurface(
         targetValue = if (selected) {
             StudyBlue.copy(alpha = .46f)
         } else {
-            MaterialTheme.colorScheme.outline.copy(alpha = .58f)
+            MaterialTheme.colorScheme.outline.copy(alpha = .48f)
         },
         animationSpec = spring(stiffness = 900f, dampingRatio = .9f),
         label = "glassBorder"

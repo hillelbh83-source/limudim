@@ -254,27 +254,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setSearchQuery(query: String) {
-        mutableState.update { it.copy(searchQuery = query) }
         val generation = ++searchGeneration
         searchJob?.cancel()
         if (query.trim().length < 2) {
-            mutableState.update { it.copy(searchResults = emptyList(), searchLoading = false) }
+            mutableState.update {
+                it.copy(
+                    searchQuery = query,
+                    searchResults = emptyList(),
+                    searchLoading = false,
+                    searchSettledQuery = ""
+                )
+            }
             return
+        }
+        // Mark the query as pending immediately. Previously the UI exposed the empty state during
+        // this debounce window and then replaced it with the actual results 320 ms later.
+        mutableState.update {
+            it.copy(
+                searchQuery = query,
+                searchResults = emptyList(),
+                searchLoading = true,
+                searchSettledQuery = ""
+            )
         }
         searchJob = viewModelScope.launch {
             delay(320)
             if (generation != searchGeneration) return@launch
-            mutableState.update { it.copy(searchLoading = true) }
+            val normalized = query.trim()
             try {
-                val results = api.search(query.trim())
+                val results = api.search(normalized)
                 if (generation != searchGeneration) return@launch
-                mutableState.update { it.copy(searchResults = results, searchLoading = false) }
+                mutableState.update {
+                    it.copy(searchResults = results, searchLoading = false, searchSettledQuery = normalized)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 if (generation != searchGeneration) return@launch
                 mutableState.update {
-                    it.copy(searchLoading = false, toast = error.userMessage("החיפוש נכשל"))
+                    it.copy(
+                        searchLoading = false,
+                        searchSettledQuery = normalized,
+                        toast = error.userMessage("החיפוש נכשל")
+                    )
                 }
             }
         }
@@ -419,6 +441,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 adminUsers = emptyList(),
                 accessRequests = emptyList(),
                 publicCourseIds = emptySet(),
+                adminSelectedUser = null,
+                adminGeminiKeys = emptyList(),
+                adminPasswords = emptyList(),
+                adminExportJson = null,
                 chatOpen = false,
                 chatExpanded = false,
                 toast = "התנתקת בהצלחה"
@@ -574,7 +600,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         adminGeneration++
         adminJob?.cancel()
         adminJob = null
-        mutableState.update { it.copy(adminOpen = false, adminLoading = false) }
+        mutableState.update { it.copy(adminOpen = false, adminLoading = false, adminSelectedUser = null) }
     }
 
     fun loadAdmin() {
@@ -591,7 +617,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             adminOverview = data.overview,
                             adminUsers = data.users,
                             accessRequests = data.requests,
-                            publicCourseIds = data.publicCourseIds
+                            publicCourseIds = data.publicCourseIds,
+                            adminGeminiKeys = data.geminiKeys,
+                            adminPasswords = data.passwords
                         )
                     }
                 }
@@ -608,11 +636,71 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 .onSuccess { blocked ->
                     mutableState.update { current ->
                         if (!current.adminOpen || current.user?.isAdmin != true) current else current.copy(
-                            adminUsers = current.adminUsers.map { if (it.id == userId) it.copy(isBlocked = blocked) else it }
+                            adminUsers = current.adminUsers.map { if (it.id == userId) it.copy(isBlocked = blocked) else it },
+                            adminSelectedUser = current.adminSelectedUser?.let {
+                                if (it.userId == userId) it.copy(isBlocked = blocked) else it
+                            }
                         )
                     }
                 }
                 .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("הפעולה נכשלה")) } }
+        }
+    }
+
+    fun selectAdminUser(userId: String) {
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true, adminSelectedUser = null) }
+            runCatching { api.loadAdminUser(userId) }
+                .onSuccess { details -> mutableState.update { it.copy(adminLoading = false, adminSelectedUser = details) } }
+                .onFailure { error ->
+                    mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("טעינת המשתמש נכשלה")) }
+                }
+        }
+    }
+
+    fun deleteAdminUser(userId: String) {
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true) }
+            runCatching { api.deleteAdminUser(userId) }
+                .onSuccess {
+                    mutableState.update {
+                        it.copy(
+                            adminLoading = false,
+                            adminUsers = it.adminUsers.filterNot { user -> user.id == userId },
+                            adminSelectedUser = null,
+                            toast = "המשתמש נמחק"
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("מחיקת המשתמש נכשלה")) }
+                }
+        }
+    }
+
+    fun sendAdminMessage(targetUserId: String, subject: String, content: String, email: Boolean, inApp: Boolean) {
+        if (content.isBlank() || (!email && !inApp)) {
+            mutableState.update { it.copy(toast = "יש לכתוב הודעה ולבחור אמצעי שליחה") }
+            return
+        }
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true) }
+            runCatching { api.sendAdminMessage(targetUserId, subject.trim(), content.trim(), email, inApp) }
+                .onSuccess { mutableState.update { it.copy(adminLoading = false, toast = "ההודעה נשלחה") } }
+                .onFailure { error ->
+                    mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("שליחת ההודעה נכשלה")) }
+                }
+        }
+    }
+
+    fun loadAdminRequests(status: String) {
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true) }
+            runCatching { api.loadAccessRequests(status) }
+                .onSuccess { requests -> mutableState.update { it.copy(adminLoading = false, accessRequests = requests) } }
+                .onFailure { error ->
+                    mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("טעינת הבקשות נכשלה")) }
+                }
         }
     }
 
@@ -631,23 +719,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { api.togglePublicCourse(courseId) }
                 .onSuccess { ids ->
                     mutableState.update {
-                        if (!it.adminOpen || it.user?.isAdmin != true) it else it.copy(publicCourseIds = ids)
+                        if (!it.adminOpen || it.user?.isAdmin != true) it else it.copy(
+                            publicCourseIds = ids,
+                            adminOverview = it.adminOverview?.copy(publicCoursesCount = ids.size)
+                        )
                     }
                 }
                 .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("עדכון הקורס נכשל")) } }
         }
     }
 
-    fun updateAdminSettings(requirePassword: Boolean, geminiEnabled: Boolean, shortExplain: Boolean) {
+    fun clearPublicCourses() {
         viewModelScope.launch {
-            runCatching { api.updateSystemSettings(requirePassword, geminiEnabled, shortExplain) }
+            runCatching { api.clearPublicCourses() }
+                .onSuccess {
+                    mutableState.update {
+                        it.copy(
+                            publicCourseIds = emptySet(),
+                            adminOverview = it.adminOverview?.copy(publicCoursesCount = 0),
+                            toast = "כל הקורסים הציבוריים נסגרו"
+                        )
+                    }
+                }
+                .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("סגירת הקורסים נכשלה")) } }
+        }
+    }
+
+    fun updateAdminSettings(requirePassword: Boolean, geminiEnabled: Boolean, shortExplain: Boolean, model: String) {
+        viewModelScope.launch {
+            runCatching { api.updateSystemSettings(requirePassword, geminiEnabled, shortExplain, model) }
                 .onSuccess {
                     mutableState.update {
                         if (!it.adminOpen || it.user?.isAdmin != true) it else it.copy(
                             adminOverview = it.adminOverview?.copy(
                                 requireCoursePassword = requirePassword,
                                 geminiServerKeysEnabled = geminiEnabled,
-                                askPopoverShortExplainEnabled = shortExplain
+                                askPopoverShortExplainEnabled = shortExplain,
+                                pythiChatModel = model
                             ),
                             toast = "הגדרות המערכת נשמרו"
                         )
@@ -656,6 +764,63 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("שמירת ההגדרות נכשלה")) } }
         }
     }
+
+    fun createGeminiKey(label: String, key: String) {
+        if (key.isBlank()) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true) }
+            runCatching { api.createGeminiKey(label.trim(), key.trim()) }
+                .onSuccess { keys -> mutableState.update { it.copy(adminLoading = false, adminGeminiKeys = keys, toast = "המפתח נוסף") } }
+                .onFailure { error -> mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("הוספת המפתח נכשלה")) } }
+        }
+    }
+
+    fun updateGeminiKey(keyId: String, label: String, apiKey: String?, enabled: Boolean) {
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true) }
+            runCatching { api.updateGeminiKey(keyId, label.trim(), apiKey?.trim(), enabled) }
+                .onSuccess { keys -> mutableState.update { it.copy(adminLoading = false, adminGeminiKeys = keys, toast = "המפתח עודכן") } }
+                .onFailure { error -> mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("עדכון המפתח נכשל")) } }
+        }
+    }
+
+    fun clearGeminiCooldown(keyId: String) {
+        viewModelScope.launch {
+            runCatching { api.clearGeminiCooldown(keyId) }
+                .onSuccess { keys -> mutableState.update { it.copy(adminGeminiKeys = keys, toast = "ה־cooldown נוקה") } }
+                .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("ניקוי ה־cooldown נכשל")) } }
+        }
+    }
+
+    fun deleteGeminiKey(keyId: String) {
+        viewModelScope.launch {
+            runCatching { api.deleteGeminiKey(keyId) }
+                .onSuccess { keys -> mutableState.update { it.copy(adminGeminiKeys = keys, toast = "המפתח נמחק") } }
+                .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("מחיקת המפתח נכשלה")) } }
+        }
+    }
+
+    fun updateSystemPassword(type: String, password: String) {
+        if (password.isBlank()) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(adminLoading = true) }
+            runCatching { api.updateSystemPassword(type, password.trim()) }
+                .onSuccess { passwords ->
+                    mutableState.update { it.copy(adminLoading = false, adminPasswords = passwords, toast = "הסיסמה עודכנה") }
+                }
+                .onFailure { error -> mutableState.update { it.copy(adminLoading = false, toast = error.userMessage("עדכון הסיסמה נכשל")) } }
+        }
+    }
+
+    fun exportGeminiKeys() {
+        viewModelScope.launch {
+            runCatching { api.exportGeminiKeys() }
+                .onSuccess { json -> mutableState.update { it.copy(adminExportJson = json) } }
+                .onFailure { error -> mutableState.update { it.copy(toast = error.userMessage("ייצוא המפתחות נכשל")) } }
+        }
+    }
+
+    fun consumeAdminExport() = mutableState.update { it.copy(adminExportJson = null) }
 
     fun consumeToast() = mutableState.update { it.copy(toast = null) }
 

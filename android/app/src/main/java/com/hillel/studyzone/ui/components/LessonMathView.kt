@@ -7,6 +7,7 @@ import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Build
 import android.view.View
+import android.view.MotionEvent
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -73,6 +74,7 @@ fun LessonMathView(content: String, modifier: Modifier = Modifier) {
 @Composable
 fun ChatRichText(
     messages: List<ChatMessage>,
+    onTap: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (messages.isEmpty()) return
@@ -112,7 +114,13 @@ fun ChatRichText(
         AndroidView(
             factory = { webView },
             modifier = modifier,
-            update = { it.submit("messages", payload) }
+            update = {
+                it.setOnTouchListener { _, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_UP) onTap()
+                    false
+                }
+                it.submit("messages", payload)
+            }
         )
         DisposableEffect(webView) {
             onDispose { webView.disposeSafely() }
@@ -177,7 +185,7 @@ private fun currentWebPalette() = WebPalette(
     error = MaterialTheme.colorScheme.error.toArgb().toHexColor()
 )
 
-private const val LOCAL_BASE_URL = "https://local.studyzone.app/"
+private const val LOCAL_BASE_URL = "file:///android_asset/katex/"
 
 private object KatexAsset {
     @Volatile
@@ -226,10 +234,15 @@ private fun LocalRendererWebView.configureLocalRenderer(background: String) {
     overScrollMode = View.OVER_SCROLL_NEVER
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = false
-    settings.allowFileAccess = false
+    // KaTeX CSS and its WOFF2 fonts are packaged next to the renderer. File access is limited to
+    // this local document; network and universal access from file URLs remain blocked.
+    settings.allowFileAccess = true
     settings.allowContentAccess = false
+    settings.allowFileAccessFromFileURLs = false
+    settings.allowUniversalAccessFromFileURLs = false
     settings.loadsImagesAutomatically = false
     settings.blockNetworkImage = true
+    settings.blockNetworkLoads = true
     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
     settings.cacheMode = WebSettings.LOAD_NO_CACHE
     settings.setSupportZoom(true)
@@ -263,6 +276,7 @@ private fun lessonShell(palette: WebPalette, bodySize: Float, katexSource: Strin
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes" />
+      <link rel="stylesheet" href="katex.min.css" />
       <style>
         :root { color-scheme: light dark; --blue:#1473ff; --fg:${palette.foreground}; --muted:${palette.muted};
                 --surface:${palette.surface}; --outline:${palette.outline}; }
@@ -286,10 +300,13 @@ private fun lessonShell(palette: WebPalette, bodySize: Float, katexSource: Strin
         pre { direction:ltr; text-align:left; overflow:auto; padding:16px; border:1px solid var(--outline);
               background:var(--surface); border-radius:18px; }
         .math { direction:ltr; unicode-bidi:isolate; max-width:100%; color:var(--fg); }
-        .math.inline { display:inline-block; vertical-align:middle; margin:0 .12em; }
-        .math.display { display:block; overflow-x:auto; overflow-y:hidden; margin:1.15em 0; padding:14px 12px;
-                        text-align:center; background:var(--surface); border:1px solid var(--outline); border-radius:18px; }
-        math { direction:ltr; font-size:1.06em; }
+        .math.inline { display:inline-block; vertical-align:-.12em; margin:0 .13em; }
+        .math.display { display:block; overflow-x:auto; overflow-y:hidden; margin:1.2em 0; padding:18px 14px;
+                        text-align:center; background:color-mix(in srgb,var(--surface) 72%,transparent);
+                        border-block:1px solid color-mix(in srgb,var(--outline) 72%,transparent); border-radius:16px; }
+        .katex { font-size:1.1em; text-rendering:optimizeLegibility; }
+        .katex-display { margin:0; }
+        .katex-mathml { position:absolute; }
         .math-error { direction:ltr; color:${palette.error}; font-family:ui-monospace,monospace; }
         ::selection { background:#1473ff42; }
       </style>
@@ -310,6 +327,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=2,user-scalable=yes" />
+      <link rel="stylesheet" href="katex.min.css" />
       <style>
         :root { color-scheme:light dark; --blue:#1473ff; --fg:${palette.foreground}; --muted:${palette.muted};
                 --surface:${palette.surface}; --outline:${palette.outline}; --error:${palette.error}; }
@@ -327,11 +345,14 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .message p { margin:.45em 0; } .message p:first-child { margin-top:0; } .message p:last-child { margin-bottom:0; }
         .message ul { margin:.5em 0; padding-inline-start:1.2em; }
         .message hr { height:1px; margin:.9em 0; border:0; background:var(--outline); }
-        .math { direction:ltr; unicode-bidi:isolate; max-width:100%; }
-        .math.inline { display:inline-block; vertical-align:middle; margin:0 .1em; }
-        .math.display { display:block; overflow-x:auto; margin:.8em 0; padding:10px 7px; text-align:center;
-                        border-radius:13px; background:#00000012; }
-        math { direction:ltr; font-size:1.03em; }
+        .math { direction:ltr; unicode-bidi:isolate; max-width:100%; color:inherit; }
+        .math.inline { display:inline-block; vertical-align:-.12em; margin:0 .1em; }
+        .math.display { display:block; overflow-x:auto; overflow-y:hidden; margin:.95em 0; padding:12px 8px;
+                        text-align:center; border-radius:12px;
+                        background:color-mix(in srgb,var(--outline) 24%,transparent); }
+        .katex { font-size:1.08em; text-rendering:optimizeLegibility; }
+        .katex-display { margin:0; }
+        .katex-mathml { position:absolute; }
         code { direction:ltr; unicode-bidi:isolate; font-family:ui-monospace,monospace; background:#00000016;
                padding:.12em .3em; border-radius:6px; }
         .typing { display:inline-flex; direction:ltr; gap:4px; padding:4px; }
@@ -382,7 +403,7 @@ private fun sharedRendererScript() = """
       try {
         return '<span class="math ' + (display ? 'display' : 'inline') + '" dir="ltr">' +
           katex.renderToString(String(tex || '').trim(), {
-            output:'mathml', throwOnError:false, strict:'ignore', displayMode:display, trust:false
+            output:'htmlAndMathml', throwOnError:false, strict:'ignore', displayMode:display, trust:false
           }) + '</span>';
       } catch (_) {
         return '<code class="math-error" dir="ltr">' + escapeHtml(tex) + '</code>';

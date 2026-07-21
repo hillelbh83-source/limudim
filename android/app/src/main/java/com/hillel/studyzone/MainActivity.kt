@@ -5,8 +5,8 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -50,12 +51,11 @@ import com.hillel.studyzone.ui.screens.ChatOverlay
 import com.hillel.studyzone.ui.screens.CourseDetailScreen
 import com.hillel.studyzone.ui.screens.CoursesScreen
 import com.hillel.studyzone.ui.screens.IntroSplash
+import com.hillel.studyzone.ui.screens.ThemeRevealOverlay
 import com.hillel.studyzone.ui.screens.LessonScreen
-import com.hillel.studyzone.ui.screens.PdfOverlay
 import com.hillel.studyzone.ui.screens.ProfileScreen
 import com.hillel.studyzone.ui.screens.SavedScreen
 import com.hillel.studyzone.ui.screens.SearchScreen
-import com.hillel.studyzone.ui.screens.ToolsScreen
 import com.hillel.studyzone.ui.components.LocalHapticsEnabled
 import com.hillel.studyzone.ui.theme.StudyZoneTheme
 import kotlinx.coroutines.delay
@@ -81,15 +81,15 @@ class MainActivity : ComponentActivity() {
                 .start()
         }
         setContent {
-            // Theme settings are isolated from high-frequency UI state (notably chat streaming),
-            // so the entire theme tree is not invalidated for every server chunk.
-            val settings by viewModel.settings.collectAsStateWithLifecycle()
-            StudyZoneTheme(settings.themeMode, settings.fontScale) {
+            // A single collected snapshot drives both the theme and the screen. Keeping these in
+            // the same composition frame prevents the icon from changing before the palette.
+            val state by viewModel.state.collectAsStateWithLifecycle()
+            StudyZoneTheme(state.settings.themeMode, state.settings.fontScale) {
                 CompositionLocalProvider(
                     androidx.compose.ui.platform.LocalLayoutDirection provides Rtl,
-                    LocalHapticsEnabled provides settings.haptics
+                    LocalHapticsEnabled provides state.settings.haptics
                 ) {
-                    StudyZoneRoot(viewModel, activeIntent)
+                    StudyZoneRoot(viewModel, state, activeIntent)
                 }
             }
         }
@@ -103,26 +103,35 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.model.UiState, launchIntent: Intent?) {
     val context = LocalContext.current
+    val systemDark = isSystemInDarkTheme()
+    val resolvedDark = when (state.settings.themeMode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+    }
     var introVisible by rememberSaveable { mutableStateOf(true) }
     var handledDeepLink by rememberSaveable { mutableStateOf<String?>(null) }
-    var pdfUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
+    var pendingAdminExport by remember { mutableStateOf<String?>(null) }
+    val adminExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingAdminExport
+        if (uri != null && content != null) {
             runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
             }
-            pdfUri = uri
         }
+        pendingAdminExport = null
+        viewModel.consumeAdminExport()
     }
 
     LaunchedEffect(Unit) {
         // Let real content draw underneath first, then play a brief branded hand-off. Network and
         // DataStore work continue independently and can never prolong this animation.
         withFrameNanos { }
-        delay(if (viewModel.settings.value.reduceMotion) 80 else 360)
+        delay(if (state.settings.reduceMotion) 80 else 620)
         introVisible = false
     }
 
@@ -130,6 +139,14 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
         if (state.toast != null) {
             delay(2800)
             viewModel.consumeToast()
+        }
+    }
+
+    LaunchedEffect(state.adminExportJson) {
+        val json = state.adminExportJson ?: return@LaunchedEffect
+        if (pendingAdminExport == null) {
+            pendingAdminExport = json
+            adminExportLauncher.launch("gemini-server-keys-${System.currentTimeMillis()}.json")
         }
     }
 
@@ -158,12 +175,11 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
 
     val selectedCourse = state.selectedCourse
 
-    val hasBackDestination = introVisible || pdfUri != null || state.adminOpen || state.authOpen ||
+    val hasBackDestination = introVisible || state.adminOpen || state.authOpen ||
         state.chatOpen || state.lesson != null || state.lessonLoading || state.selectedCourse != null
     BackHandler(enabled = hasBackDestination) {
         when {
             introVisible -> introVisible = false
-            pdfUri != null -> pdfUri = null
             state.adminOpen -> viewModel.closeAdmin()
             state.authOpen -> viewModel.setAuthOpen(false)
             state.chatExpanded -> viewModel.setChatExpanded(false)
@@ -196,13 +212,15 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
                         state,
                         onCourse = viewModel::openCourse,
                         onProfile = { viewModel.selectTab(RootTab.PROFILE) },
+                        darkMode = resolvedDark,
                         onThemeToggle = {
-                            viewModel.setTheme(if (state.settings.themeMode == ThemeMode.DARK) ThemeMode.LIGHT else ThemeMode.DARK)
+                            // SYSTEM means the current phone palette, so the first tap must always
+                            // create a visible change instead of merely replacing SYSTEM with DARK.
+                            viewModel.setTheme(if (resolvedDark) ThemeMode.LIGHT else ThemeMode.DARK)
                         }
                     )
                     RootTab.SEARCH -> SearchScreen(state, viewModel::setSearchQuery, viewModel::openLesson)
                     RootTab.SAVED -> SavedScreen(state, viewModel::openLesson)
-                    RootTab.TOOLS -> ToolsScreen { pdfPicker.launch(arrayOf("application/pdf")) }
                     RootTab.PROFILE -> ProfileScreen(
                         state,
                         onAuth = { viewModel.setAuthOpen(true) },
@@ -218,7 +236,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
             }
         }
 
-        if (state.lesson == null && !state.lessonLoading && !state.adminOpen && pdfUri == null && !state.chatOpen) {
+        if (state.lesson == null && !state.lessonLoading && !state.adminOpen && !state.chatOpen) {
             BottomGlassNav(
                 active = state.rootTab,
                 onTab = viewModel::selectTab,
@@ -226,7 +244,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
             )
         }
 
-        if (!state.adminOpen && pdfUri == null && !state.authOpen) {
+        if (!state.adminOpen && !state.authOpen) {
             ChatOverlay(
                 state = state,
                 onOpen = viewModel::setChatOpen,
@@ -235,10 +253,8 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
                 onSend = viewModel::sendChat,
                 onStop = viewModel::stopChat,
                 onClear = viewModel::clearChat,
-                modifier = if (state.chatExpanded) {
-                    Modifier.align(Alignment.Center).padding(8.dp)
-                } else if (state.chatOpen) {
-                    Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp)
+                modifier = if (state.chatOpen) {
+                    Modifier.fillMaxSize()
                 } else {
                     Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp)
                 }
@@ -258,14 +274,23 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
                 state,
                 onClose = viewModel::closeAdmin,
                 onReload = viewModel::loadAdmin,
+                onSelectUser = viewModel::selectAdminUser,
                 onToggleBlock = viewModel::toggleUserBlock,
+                onDeleteUser = viewModel::deleteAdminUser,
+                onSendMessage = viewModel::sendAdminMessage,
+                onLoadRequests = viewModel::loadAdminRequests,
                 onAccess = viewModel::handleAccessRequest,
                 onTogglePublic = viewModel::togglePublicCourse,
-                onSettings = viewModel::updateAdminSettings
+                onClearPublic = viewModel::clearPublicCourses,
+                onSettings = viewModel::updateAdminSettings,
+                onCreateKey = viewModel::createGeminiKey,
+                onUpdateKey = viewModel::updateGeminiKey,
+                onClearCooldown = viewModel::clearGeminiCooldown,
+                onDeleteKey = viewModel::deleteGeminiKey,
+                onExportKeys = viewModel::exportGeminiKeys,
+                onPassword = viewModel::updateSystemPassword
             )
         }
-
-        pdfUri?.let { PdfOverlay(it) { pdfUri = null } }
 
         AnimatedVisibility(
             visible = state.toast != null,
@@ -279,6 +304,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, launchIntent: Intent?) {
         }
 
         IntroSplash(introVisible)
+        if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background)
     }
 }
 
