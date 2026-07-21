@@ -14,7 +14,7 @@ val studyZoneWebUrl = providers.gradleProperty("STUDYZONE_WEB_URL")
 
 android {
     namespace = "com.hillel.studyzone"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.hillel.studyzone"
@@ -70,7 +70,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.04.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 

@@ -15,7 +15,7 @@
 ## פתיחה והרצה
 
 פתחו את התיקייה `android/` ב־Android Studio Quail 2 ומעלה. הפרויקט משתמש ב־JDK 17,
-AGP 9.3, Gradle 9.5 ו־`compileSdk 37`.
+AGP 9.3, Gradle 9.5 ו־`compileSdk 36`.
 
 כתובות ברירת המחדל מוגדרות ב־`app/build.gradle.kts`. לסביבת פיתוח אפשר להעביר:
 
