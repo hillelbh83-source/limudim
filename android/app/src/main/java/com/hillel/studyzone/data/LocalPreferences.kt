@@ -26,7 +26,8 @@ data class LocalSnapshot(
     val settings: AppSettings,
     val completed: Set<String>,
     val bookmarks: Set<String>,
-    val user: User?
+    val user: User?,
+    val pythiMemories: Map<String, String>
 )
 
 class LocalPreferences(private val context: Context) {
@@ -54,6 +55,7 @@ class LocalPreferences(private val context: Context) {
         val bookmarks = stringPreferencesKey("bookmarked_sections")
         val courses = stringPreferencesKey("cached_courses_v1")
         val user = stringPreferencesKey("cached_user_v1")
+        val pythiMemories = stringPreferencesKey("pythi_memories_v1")
     }
 
     private var decodedUserReady = false
@@ -91,7 +93,8 @@ class LocalPreferences(private val context: Context) {
                 ),
                 completed = decodeSet(prefs[Keys.completed]),
                 bookmarks = decodeSet(prefs[Keys.bookmarks]),
-                user = cachedDecodeUser(prefs[Keys.user])
+                user = cachedDecodeUser(prefs[Keys.user]),
+                pythiMemories = decodeMemories(prefs[Keys.pythiMemories])
             )
         }
         .flowOn(Dispatchers.IO)
@@ -126,6 +129,11 @@ class LocalPreferences(private val context: Context) {
 
     suspend fun saveBookmarks(values: Set<String>) {
         context.dataStore.edit { it[Keys.bookmarks] = encodeSet(values) }
+    }
+
+    suspend fun savePythiMemories(values: Map<String, String>) {
+        val encoded = encodeMemories(values)
+        context.dataStore.edit { it[Keys.pythiMemories] = encoded }
     }
 
     /** Atomically caches the small account snapshot received from the server. */
@@ -182,3 +190,23 @@ private fun decodeUser(raw: String?): User? = runCatching {
         isGoogle = item.optBoolean("isGoogle")
     )
 }.getOrNull()
+
+private fun encodeMemories(values: Map<String, String>): String = JSONObject().apply {
+    values.entries
+        .sortedBy { it.key }
+        .take(100)
+        .forEach { (key, value) ->
+            val safeKey = key.trim().take(80)
+            if (safeKey.isNotBlank()) put(safeKey, value.trim().take(500))
+        }
+}.toString()
+
+private fun decodeMemories(raw: String?): Map<String, String> = runCatching {
+    val source = JSONObject(raw ?: return@runCatching emptyMap())
+    buildMap {
+        source.keys().forEach { key ->
+            val value = source.opt(key)?.toString().orEmpty()
+            if (key.isNotBlank() && value.isNotBlank()) put(key, value)
+        }
+    }
+}.getOrDefault(emptyMap())

@@ -2,9 +2,11 @@ package com.hillel.studyzone
 
 import android.content.Intent
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -13,6 +15,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -47,9 +54,8 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException as GoogleApiException
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
 import com.hillel.studyzone.ui.screens.AdminScreen
@@ -66,32 +72,30 @@ import com.hillel.studyzone.ui.screens.SavedScreen
 import com.hillel.studyzone.ui.screens.SearchScreen
 import com.hillel.studyzone.ui.screens.SettingsScreen
 import com.hillel.studyzone.ui.components.LocalHapticsEnabled
-import com.hillel.studyzone.ui.components.LocalCourseWebView
 import com.hillel.studyzone.ui.theme.StudyZoneTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
     private var activeIntent by mutableStateOf<Intent?>(null)
-    private val googleSignInLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        try {
-            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-                .getResult(GoogleApiException::class.java)
-            val token = account.idToken.orEmpty()
-            if (token.isBlank()) error("Google לא החזירה אסימון התחברות")
-            viewModel.loginWithGoogle(token)
-        } catch (error: GoogleApiException) {
-            val message = when (error.statusCode) {
-                12501 -> "ההתחברות עם Google בוטלה"
-                10 -> "Google דחתה את חתימת האפליקציה (שגיאת OAuth 10)"
-                7 -> "לא היה חיבור ל־Google. נסו שוב"
-                else -> "ההתחברות עם Google נכשלה (קוד ${error.statusCode})"
-            }
-            viewModel.showMessage(message)
-        } catch (error: Throwable) {
-            viewModel.showMessage("ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}")
+    private var sendVoiceImmediately = false
+    private val chatFilesLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        viewModel.addChatAttachments(uris)
+    }
+    private val profilePhotoLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let(viewModel::updateProfilePhoto)
+    }
+    private val speechLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val text = if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+        } else ""
+        if (text.isNotBlank()) {
+            viewModel.setChatInput(text)
+            if (sendVoiceImmediately) viewModel.sendChat()
         }
+        sendVoiceImmediately = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -137,11 +141,49 @@ class MainActivity : ComponentActivity() {
     }
 
     fun launchGoogleSignIn() {
-        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(BuildConfig.GOOGLE_WEB_CLIENT_ID)
-            .requestEmail()
-            .build()
-        googleSignInLauncher.launch(GoogleSignIn.getClient(this, options).signInIntent)
+        lifecycleScope.launch {
+            runCatching {
+                val option = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
+                val credential = CredentialManager.create(this@MainActivity).getCredential(
+                    context = this@MainActivity,
+                    request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+                ).credential
+                if (credential !is CustomCredential || credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    error("Google לא החזירה פרטי התחברות תקינים")
+                }
+                GoogleIdTokenCredential.createFrom(credential.data).idToken
+            }.onSuccess(viewModel::loginWithGoogle)
+                .onFailure { error ->
+                    viewModel.showMessage(
+                        when {
+                            error is GetCredentialCancellationException -> "ההתחברות עם Google בוטלה"
+                            error is NoCredentialException -> "לא נמצא חשבון Google זמין במכשיר"
+                            error.javaClass.simpleName.contains("Configuration", ignoreCase = true) ->
+                                "Google עדיין לא מזהה את חתימת האפליקציה. יש לעדכן את SHA-1 ב-Google Auth Platform"
+                            else -> "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}"
+                        }
+                    )
+                }
+        }
+    }
+
+    fun launchChatAttachmentPicker() {
+        chatFilesLauncher.launch(arrayOf("image/*", "application/pdf", "text/plain"))
+    }
+
+    fun launchProfilePhotoPicker() {
+        profilePhotoLauncher.launch("image/*")
+    }
+
+    fun launchVoiceInput(sendImmediately: Boolean) {
+        sendVoiceImmediately = sendImmediately
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("he", "IL").toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "דברו עם פיתי")
+        }
+        runCatching { speechLauncher.launch(intent) }
+            .onFailure { viewModel.showMessage("הכתבה קולית אינה זמינה במכשיר הזה") }
     }
 }
 
@@ -238,11 +280,6 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
             state.error != null && state.courses.isEmpty() -> ErrorState(state.error.orEmpty(), viewModel::bootstrap)
-            selectedCourse != null -> LocalCourseWebView(
-                courseId = selectedCourse.id,
-                darkMode = resolvedDark,
-                onBack = viewModel::closeCourse
-            )
             state.lesson != null || state.lessonLoading -> LessonScreen(
                 state = state,
                 onBack = viewModel::closeLesson,
@@ -250,6 +287,12 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onCompleted = viewModel::toggleCompleted,
                 onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
                 onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) }
+            )
+            selectedCourse != null -> CourseDetailScreen(
+                state = state,
+                onBack = viewModel::closeCourse,
+                onLesson = { sectionId -> viewModel.openLesson(selectedCourse.id, sectionId) },
+                onRequestAccess = { viewModel.requestCourseAccess(selectedCourse.id) }
             )
             else -> AnimatedContent(targetState = state.rootTab, label = "rootTab") { tab ->
                 when (tab) {
@@ -269,7 +312,13 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                         state,
                         onAuth = { viewModel.setAuthOpen(true) },
                         onLogout = viewModel::logout,
-                        onAdmin = viewModel::openAdmin
+                        onAdmin = viewModel::openAdmin,
+                        onSaveMemory = viewModel::savePythiMemory,
+                        onRemoveMemory = viewModel::removePythiMemory,
+                        onUpdateName = viewModel::updateProfileName,
+                        onUpdatePhoto = { (context as? MainActivity)?.launchProfilePhotoPicker() },
+                        onSendAdminMessage = viewModel::sendAdminMessage,
+                        onChangePassword = viewModel::changePassword
                     )
                     RootTab.SETTINGS -> SettingsScreen(
                         state = state,
@@ -317,6 +366,9 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onOpen = viewModel::setChatOpen,
                 onExpanded = viewModel::setChatExpanded,
                 onInput = viewModel::setChatInput,
+                onAttach = { (context as? MainActivity)?.launchChatAttachmentPicker() },
+                onRemoveAttachment = viewModel::removeChatAttachment,
+                onVoice = { sendImmediately -> (context as? MainActivity)?.launchVoiceInput(sendImmediately) },
                 onSend = viewModel::sendChat,
                 onStop = viewModel::stopChat,
                 onClear = viewModel::clearChat,

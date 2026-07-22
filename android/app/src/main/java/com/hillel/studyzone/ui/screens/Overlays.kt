@@ -56,6 +56,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Check
@@ -65,10 +67,12 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -76,6 +80,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -509,6 +514,9 @@ fun ChatOverlay(
     onOpen: (Boolean) -> Unit,
     onExpanded: (Boolean) -> Unit,
     onInput: (String) -> Unit,
+    onAttach: () -> Unit,
+    onRemoveAttachment: (Long) -> Unit,
+    onVoice: (Boolean) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onClear: () -> Unit,
@@ -535,154 +543,230 @@ fun ChatOverlay(
             Unit
         }
     }
-    Box(modifier.imePadding().navigationBarsPadding()) {
-        Box(
-            Modifier.matchParentSize().clickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-                onClick = dismissKeyboard
-            )
-        )
-        AnimatedVisibility(
-            visible = state.chatOpen,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 8.dp, vertical = 6.dp),
-            enter = fadeIn() + scaleIn(initialScale = .94f) + slideInVertically(initialOffsetY = { it / 4 }),
-            exit = fadeOut() + scaleOut(targetScale = .96f) + slideOutVertically(targetOffsetY = { it / 5 })
+    AnimatedVisibility(
+        visible = state.chatOpen,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 8 }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 8 })
+    ) {
+        Column(
+            modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
         ) {
-            GlassSurface(
-                Modifier.widthIn(max = 720.dp).fillMaxWidth()
-                    .then(
-                        if (state.chatExpanded) Modifier.fillMaxSize().statusBarsPadding()
-                        else Modifier.heightIn(min = 360.dp, max = 560.dp)
-                    )
-                    .animateContentSize(spring(dampingRatio = .88f, stiffness = 560f)),
-                shape = RoundedCornerShape(if (state.chatExpanded) 32.dp else 30.dp)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
-                    Box(
-                        Modifier.align(Alignment.CenterHorizontally).width(46.dp).height(5.dp)
-                            .clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant)
-                            .clickable { onExpanded(!state.chatExpanded) }
+                Box(Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(StudyBlue), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(21.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("פיתי", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (state.chatStreaming) "כותבת תשובה…" else "העוזרת הלימודית שלך",
+                        color = if (state.chatStreaming) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium
                     )
-                    Spacer(Modifier.height(5.dp))
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(StudyBlue), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.SmartToy, null, tint = Color.White, modifier = Modifier.size(22.dp))
-                            Box(
-                                Modifier.align(Alignment.BottomEnd).size(10.dp).clip(CircleShape)
-                                    .background(Color(0xFF31C76A))
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Pythi", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                if (state.chatStreaming) "כותבת תשובה…" else "עוזרת לימודית",
-                                color = if (state.chatStreaming) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-                        if (state.chatMessages.isNotEmpty()) {
-                            IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי השיחה") }
-                        }
-                        IconButton(onClick = { onExpanded(!state.chatExpanded) }) {
-                            Icon(
-                                if (state.chatExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
-                                if (state.chatExpanded) "הקטנת הצ׳אט" else "הרחבת הצ׳אט"
-                            )
-                        }
-                        IconButton(onClick = { dismissKeyboard(); onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
-                    }
+                }
+                if (state.chatMessages.isNotEmpty()) {
+                    IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי השיחה") }
+                }
+                IconButton(onClick = { dismissKeyboard(); onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
+            }
 
-                    if (state.chatMessages.isEmpty()) {
-                        Column(
-                            Modifier.fillMaxWidth().weight(1f)
-                                .clickable(
-                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = dismissKeyboard
-                                )
-                                .padding(horizontal = 14.dp, vertical = 14.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Box(Modifier.size(62.dp).clip(RoundedCornerShape(20.dp)).background(StudyBlue.copy(.12f)), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.SmartToy, null, tint = StudyBlue, modifier = Modifier.size(31.dp))
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Text("איך אפשר לעזור היום?", style = MaterialTheme.typography.titleLarge)
-                            Text(
-                                "אפשר לבקש הסבר, תרגול או פתרון מסודר עם נוסחאות.",
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                items(listOf("הסבר פשוט", "תרגיל לדוגמה", "סיכום קצר")) { suggestion ->
-                                    Pressable(
-                                        onClick = { onInput(suggestion); focusRequester.requestFocus(); keyboard?.show() },
-                                        shape = CircleShape,
-                                        contentPadding = 9.dp
-                                    ) { Text(suggestion, style = MaterialTheme.typography.labelMedium) }
-                                }
-                            }
-                        }
-                    } else {
-                        ChatRichText(
-                            messages = state.chatMessages,
-                            onTap = dismissKeyboard,
-                            modifier = Modifier.fillMaxWidth().weight(1f)
-                        )
-                    }
-
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 8.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(
-                                1.dp,
-                                if (state.chatInput.isNotBlank()) StudyBlue.copy(alpha = .55f) else MaterialTheme.colorScheme.outlineVariant,
-                                RoundedCornerShape(28.dp)
-                            )
-                            .padding(start = 6.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = state.chatInput,
-                            onValueChange = onInput,
-                            modifier = Modifier.weight(1f).heightIn(min = 42.dp, max = if (state.chatExpanded) 150.dp else 104.dp)
-                                .focusRequester(focusRequester),
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(StudyBlue),
-                            minLines = 1,
-                            maxLines = if (state.chatExpanded) 6 else 4,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(
-                                onSend = { if (!state.chatStreaming && state.chatInput.isNotBlank()) onSend() }
-                            ),
-                            decorationBox = { inner ->
-                                Box(Modifier.fillMaxWidth().padding(vertical = 9.dp), contentAlignment = Alignment.CenterStart) {
-                                    if (state.chatInput.isBlank()) {
-                                        Text("שאלו את Pythi…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    inner()
-                                }
-                            }
-                        )
-                        Spacer(Modifier.width(7.dp))
-                        RoundActionButton(
-                            icon = if (state.chatStreaming) Icons.Rounded.Stop else Icons.AutoMirrored.Rounded.Send,
-                            contentDescription = if (state.chatStreaming) "עצירה" else "שליחה",
-                            onClick = if (state.chatStreaming) onStop else onSend,
-                            active = state.chatStreaming || state.chatInput.isNotBlank(),
-                            size = 44.dp,
-                            enabled = state.chatStreaming || state.chatInput.isNotBlank()
-                        )
+            state.chatTimerRemainingSeconds?.let { remaining ->
+                val minutes = remaining / 60
+                val seconds = remaining % 60
+                GlassSurface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    selected = true
+                ) {
+                    Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Timer, null, tint = StudyBlue, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(9.dp))
+                        Text(state.chatTimerLabel, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        Text("%02d:%02d".format(minutes, seconds), color = StudyBlue, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
+
+            if (state.chatMessages.isEmpty()) {
+                Column(
+                    Modifier.fillMaxWidth().weight(1f)
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = dismissKeyboard
+                        )
+                        .padding(horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        Modifier.size(72.dp).clip(RoundedCornerShape(24.dp))
+                            .background(Brush.linearGradient(listOf(StudyBlue, Color(0xFF6846E8)))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(34.dp))
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    Text("איך אפשר לעזור לך היום?", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+                    Text(
+                        "אפשר לבקש הסבר, תרגול, בוחן, כרטיסיות או פתרון עם נוסחאות.",
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            } else {
+                ChatRichText(
+                    messages = state.chatMessages,
+                    onTap = dismissKeyboard,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
+            }
+
+            if (state.chatSuggestions.isNotEmpty() && state.chatInput.isBlank() && state.chatAttachments.isEmpty() && !state.chatStreaming) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    items(state.chatSuggestions) { suggestion ->
+                        Pressable(
+                            onClick = { onInput(suggestion); onSend() },
+                            shape = CircleShape,
+                            contentPadding = 9.dp
+                        ) { Text(suggestion, color = StudyBlue, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+            }
+
+            if (state.chatAttachments.isNotEmpty()) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    items(state.chatAttachments, key = { it.id }) { attachment ->
+                        Pressable(
+                            onClick = { onRemoveAttachment(attachment.id) },
+                            shape = CircleShape,
+                            contentPadding = 9.dp
+                        ) {
+                            Text("📎 ${attachment.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Icon(Icons.Rounded.Close, "הסרת קובץ", modifier = Modifier.size(15.dp))
+                        }
+                    }
+                }
+            }
+
+            PythiComposer(
+                input = state.chatInput,
+                streaming = state.chatStreaming,
+                hasAttachments = state.chatAttachments.isNotEmpty(),
+                focusRequester = focusRequester,
+                onInput = onInput,
+                onAttach = onAttach,
+                onVoice = onVoice,
+                onSend = onSend,
+                onStop = onStop,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            )
         }
+    }
+}
+
+@Composable
+private fun PythiComposer(
+    input: String,
+    streaming: Boolean,
+    hasAttachments: Boolean,
+    focusRequester: FocusRequester,
+    onInput: (String) -> Unit,
+    onAttach: () -> Unit,
+    onVoice: (Boolean) -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val expanded = input.isNotBlank() || hasAttachments
+    val shape = RoundedCornerShape(34.dp)
+    val composerColor = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF242424) else MaterialTheme.colorScheme.surfaceVariant
+    val contentColor = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFF5F5F5) else MaterialTheme.colorScheme.onSurface
+    val placeholderColor = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFB7B7B7) else MaterialTheme.colorScheme.onSurfaceVariant
+    val field: @Composable (Modifier) -> Unit = { fieldModifier ->
+        androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            androidx.compose.foundation.text.BasicTextField(
+                value = input,
+                onValueChange = onInput,
+                modifier = fieldModifier.focusRequester(focusRequester),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = contentColor, textAlign = TextAlign.Right),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(StudyBlue),
+                minLines = 1,
+                maxLines = 5,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (!streaming && (input.isNotBlank() || hasAttachments)) onSend() }),
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        if (input.isBlank()) Text("שאלו את פיתי", color = placeholderColor, textAlign = TextAlign.Right)
+                        inner()
+                    }
+                }
+            )
+        }
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Column(
+            modifier
+                .clip(shape)
+                .background(composerColor)
+                .border(1.dp, Color.White.copy(alpha = if (androidx.compose.foundation.isSystemInDarkTheme()) .18f else .34f), shape)
+                .animateContentSize(spring(dampingRatio = .9f, stiffness = 620f))
+                .padding(horizontal = 9.dp, vertical = 8.dp)
+        ) {
+            if (!expanded) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
+                    field(Modifier.weight(1f).padding(horizontal = 7.dp))
+                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", { onVoice(false) }, contentColor)
+                    Spacer(Modifier.width(5.dp))
+                    ComposerIcon(Icons.Rounded.GraphicEq, "שיחה קולית עם פיתי", { onVoice(true) }, Color.White, background = StudyBlue)
+                }
+            } else {
+                field(Modifier.fillMaxWidth().heightIn(min = 52.dp, max = 122.dp).padding(horizontal = 10.dp, vertical = 7.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
+                    Spacer(Modifier.weight(1f))
+                    ComposerIcon(
+                        if (streaming) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
+                        if (streaming) "עצירת התשובה" else "שליחה",
+                        if (streaming) onStop else onSend,
+                        Color.White,
+                        background = if (streaming) MaterialTheme.colorScheme.error else StudyBlue
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    tint: Color,
+    background: Color = Color.Transparent
+) {
+    IconButton(onClick = onClick, modifier = Modifier.size(46.dp).clip(CircleShape).background(background)) {
+        Icon(icon, description, tint = tint, modifier = Modifier.size(if (background == Color.Transparent) 25.dp else 23.dp))
     }
 }
 

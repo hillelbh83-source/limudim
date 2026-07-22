@@ -57,6 +57,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Calculate
+import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Code
@@ -793,8 +794,27 @@ fun ProfileScreen(
     state: UiState,
     onAuth: () -> Unit,
     onLogout: () -> Unit,
-    onAdmin: () -> Unit
+    onAdmin: () -> Unit,
+    onSaveMemory: (String, String) -> Unit,
+    onRemoveMemory: (String) -> Unit,
+    onUpdateName: (String) -> Unit,
+    onUpdatePhoto: () -> Unit,
+    onSendAdminMessage: (String) -> Unit,
+    onChangePassword: (String, String) -> Unit
 ) {
+    var displayName by remember { mutableStateOf(state.user?.displayName.orEmpty()) }
+    var memoryTitle by remember { mutableStateOf("") }
+    var memoryDetails by remember { mutableStateOf("") }
+    var oldPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var adminMessage by remember { mutableStateOf("") }
+    var passwordMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(state.user?.displayName) {
+        displayName = state.user?.displayName.orEmpty()
+    }
+
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 130.dp),
@@ -804,17 +824,253 @@ fun ProfileScreen(
         item {
             GlassSurface(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProfileAvatar(
-                        photoUrl = state.user?.photoUrl,
-                        displayName = state.user?.displayName ?: "אורח",
-                        size = 62.dp
-                    )
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        ProfileAvatar(
+                            photoUrl = state.user?.photoUrl,
+                            displayName = state.user?.displayName ?: "אורח",
+                            size = 62.dp
+                        )
+                        if (state.user != null) {
+                            Box(
+                                Modifier.size(27.dp).clip(CircleShape).background(StudyBlue).clickable(onClick = onUpdatePhoto),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.CameraAlt, "החלפת תמונת פרופיל", tint = Color.White, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(state.user?.displayName ?: "אורח", style = MaterialTheme.typography.titleLarge)
                         Text(state.user?.email ?: "התחברו כדי לסנכרן התקדמות", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (state.user == null) TextButton(onClick = onAuth) { Text("התחברות") }
+                }
+            }
+        }
+        if (state.user != null) {
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.ChatBubbleOutline, null, tint = StudyBlue)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("הודעה למנהל", style = MaterialTheme.typography.titleLarge)
+                                Text("הצעה, שאלה או דיווח על תקלה", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        OutlinedTextField(
+                            value = adminMessage,
+                            onValueChange = { adminMessage = it.take(2_000) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("כתבו כאן ואנחנו נקרא הכול…") },
+                            minLines = 3,
+                            maxLines = 6,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        Pressable(
+                            onClick = {
+                                if (adminMessage.isNotBlank()) {
+                                    onSendAdminMessage(adminMessage)
+                                    adminMessage = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = adminMessage.isNotBlank(),
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.ChatBubbleOutline, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("שליחת הודעה", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = StudyBlue)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("פרטי החשבון", style = MaterialTheme.typography.titleLarge)
+                                Text("השם שמופיע באתר ובשיחות עם פיתי", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        OutlinedTextField(
+                            value = displayName,
+                            onValueChange = { displayName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("שם תצוגה") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        Pressable(
+                            onClick = { if (displayName.isNotBlank()) onUpdateName(displayName.trim()) },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = true,
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.CheckCircle, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("שמירת השם", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(44.dp).clip(CircleShape).background(StudyBlue.copy(.14f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Psychology, null, tint = StudyBlue)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("הזיכרונות של פיתי", style = MaterialTheme.typography.titleLarge)
+                                Text("עובדות שפיתי תזכור ותשתמש בהן בשיחות הבאות", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (state.pythiMemories.isEmpty()) {
+                            Text(
+                                "עדיין אין זיכרונות. אפשר להוסיף העדפות למידה, נושאים חשובים או כל פרט שיעזור לפיתי.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            state.pythiMemories.forEach { (title, details) ->
+                                GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(title, fontWeight = FontWeight.Bold)
+                                            if (details.isNotBlank()) {
+                                                Spacer(Modifier.height(3.dp))
+                                                Text(details, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                        TextButton(onClick = { onRemoveMemory(title) }) {
+                                            Text("מחיקה", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(.45f))
+                        Text("זיכרון חדש", fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = memoryTitle,
+                            onValueChange = { memoryTitle = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("כותרת קצרה") },
+                            placeholder = { Text("לדוגמה: איך נוח לי ללמוד") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        OutlinedTextField(
+                            value = memoryDetails,
+                            onValueChange = { memoryDetails = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("מה פיתי צריכה לזכור?") },
+                            minLines = 2,
+                            maxLines = 4,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        Pressable(
+                            onClick = {
+                                if (memoryTitle.isNotBlank() && memoryDetails.isNotBlank()) {
+                                    onSaveMemory(memoryTitle.trim(), memoryDetails.trim())
+                                    memoryTitle = ""
+                                    memoryDetails = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = memoryTitle.isNotBlank() && memoryDetails.isNotBlank(),
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.Add, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("הוספה לזיכרונות", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Key, null, tint = StudyBlue)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("סיסמה ואבטחה", style = MaterialTheme.typography.titleLarge)
+                                Text("עדכון סיסמת החשבון", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (state.user?.isGoogle != true) {
+                            OutlinedTextField(
+                                oldPassword,
+                                { oldPassword = it; passwordMessage = null },
+                                Modifier.fillMaxWidth(),
+                                label = { Text("סיסמה נוכחית") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                        } else {
+                            Text(
+                                "אפשר להגדיר סיסמה לחשבון Google גם בלי סיסמה נוכחית.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        OutlinedTextField(
+                            newPassword,
+                            { newPassword = it; passwordMessage = null },
+                            Modifier.fillMaxWidth(),
+                            label = { Text("סיסמה חדשה") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        OutlinedTextField(
+                            confirmPassword,
+                            { confirmPassword = it; passwordMessage = null },
+                            Modifier.fillMaxWidth(),
+                            label = { Text("אימות סיסמה חדשה") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            isError = passwordMessage != null,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        passwordMessage?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Pressable(
+                            onClick = {
+                                passwordMessage = when {
+                                    state.user?.isGoogle != true && oldPassword.isBlank() -> "צריך להזין את הסיסמה הנוכחית"
+                                    newPassword.length < 8 -> "הסיסמה החדשה חייבת להכיל לפחות 8 תווים"
+                                    newPassword != confirmPassword -> "הסיסמאות החדשות אינן תואמות"
+                                    else -> {
+                                        onChangePassword(oldPassword, newPassword)
+                                        oldPassword = ""
+                                        newPassword = ""
+                                        confirmPassword = ""
+                                        null
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = true,
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.Lock, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("עדכון סיסמה", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }

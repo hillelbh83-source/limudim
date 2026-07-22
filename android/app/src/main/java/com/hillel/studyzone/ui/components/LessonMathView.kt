@@ -91,13 +91,59 @@ fun ChatRichText(
     val payload = remember(messages) {
         JSONArray().apply {
             messages.forEach { message ->
-                put(
-                    JSONObject()
-                        .put("role", message.role)
-                        .put("text", message.text)
-                        .put("streaming", message.isStreaming)
-                        .put("error", message.isError)
-                )
+                val item = JSONObject()
+                    .put("id", message.id.toString())
+                    .put("role", message.role)
+                    .put("text", message.text)
+                    .put("streaming", message.isStreaming)
+                    .put("error", message.isError)
+                    .put("attachments", JSONArray().apply {
+                        message.attachments.forEach { attachment -> put(attachment.name) }
+                    })
+                message.quiz?.let { quiz ->
+                    item.put(
+                        "quiz",
+                        JSONObject()
+                            .put("title", quiz.title)
+                            .put("isExam", quiz.isExam)
+                            .put("questions", JSONArray().apply {
+                                quiz.questions.forEach { question ->
+                                    put(
+                                        JSONObject()
+                                            .put("type", question.type)
+                                            .put("question", question.question)
+                                            .put("answers", JSONArray(question.answers))
+                                            .put("correctAnswer", question.correctAnswer)
+                                    )
+                                }
+                            })
+                    )
+                }
+                if (message.flashcards.isNotEmpty()) {
+                    item.put("flashcards", JSONArray().apply {
+                        message.flashcards.forEach { card -> put(JSONObject().put("front", card.front).put("back", card.back)) }
+                    })
+                }
+                message.functionPlot?.let { plot ->
+                    item.put(
+                        "plot",
+                        JSONObject()
+                            .put("title", plot.title)
+                            .put("subtitle", plot.subtitle)
+                            .put("xMin", plot.xMin)
+                            .put("xMax", plot.xMax)
+                            .put("functions", JSONArray().apply {
+                                plot.functions.forEach { function ->
+                                    put(JSONObject().put("expression", function.expression).put("label", function.label).put("color", function.color))
+                                }
+                            })
+                            .also { payload ->
+                                plot.yMin?.let { payload.put("yMin", it) }
+                                plot.yMax?.let { payload.put("yMax", it) }
+                            }
+                    )
+                }
+                put(item)
             }
         }.toString()
     }
@@ -299,10 +345,10 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
                font:${bodySize}px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
                -webkit-font-smoothing:antialiased; }
         #messages { display:flex; flex-direction:column; gap:10px; }
-        .message { width:fit-content; max-width:88%; padding:12px 14px; border-radius:20px;
+        .message { width:fit-content; max-width:86%; padding:11px 18px; border-radius:24px;
                    overflow-wrap:anywhere; border:1px solid transparent; }
-        .message.user { align-self:flex-start; color:white; background:var(--blue); border-end-start-radius:7px; }
-        .message.model { align-self:flex-end; background:var(--surface); border-color:var(--outline); border-end-end-radius:7px; }
+        .message.user { align-self:flex-end; color:white; background:var(--blue); box-shadow:0 6px 18px #1473ff25; }
+        .message.model { align-self:flex-start; width:100%; max-width:100%; padding:9px 4px; background:transparent; border:0; }
         .message.error { color:var(--error); border-color:color-mix(in srgb,var(--error) 35%,transparent); }
         .message p { margin:.45em 0; } .message p:first-child { margin-top:0; } .message p:last-child { margin-bottom:0; }
         .message ul { margin:.5em 0; padding-inline-start:1.2em; }
@@ -322,11 +368,230 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .typing i:nth-child(2) { animation-delay:.12s; } .typing i:nth-child(3) { animation-delay:.24s; }
         .cursor { display:inline-block; width:2px; height:1.05em; margin-inline-start:3px; vertical-align:-.14em;
                   background:var(--blue); animation:blink .85s step-end infinite; }
+        .attachment-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+        .attachment { max-width:190px; padding:5px 9px; border-radius:999px; background:#ffffff22;
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.78em; }
+        .tool-card { width:100%; margin:12px 0 4px; overflow:hidden; border:1px solid var(--outline);
+                     border-radius:24px; background:color-mix(in srgb,var(--surface) 78%,transparent);
+                     box-shadow:0 16px 45px -34px #0f172aaa; }
+        .tool-head { padding:14px 16px; border-bottom:1px solid var(--outline); background:#ffffff08; }
+        .tool-title { margin:0; font-size:1.05em; font-weight:800; }
+        .tool-meta { margin-top:3px; color:var(--muted); font-size:.8em; }
+        .tool-body { padding:16px; }
+        .quiz-question { font-weight:700; line-height:1.55; margin-bottom:13px; }
+        .quiz-options { display:grid; gap:8px; }
+        .quiz-option,.quiz-nav,.quiz-submit,.flash-nav { appearance:none; width:100%; border:1px solid var(--outline);
+                     border-radius:15px; padding:11px 13px; color:var(--fg); background:transparent;
+                     text-align:right; font:inherit; }
+        .quiz-option.selected { border-color:var(--blue); background:#1473ff18; }
+        .quiz-option.correct { border-color:#22c55e; background:#22c55e18; }
+        .quiz-option.wrong { border-color:#ef4444; background:#ef444418; }
+        .quiz-answer { width:100%; min-height:46px; border:1px solid var(--outline); border-radius:15px;
+                       padding:11px 13px; color:var(--fg); background:transparent; font:inherit; }
+        textarea.quiz-answer { min-height:100px; resize:vertical; }
+        .quiz-controls { display:flex; gap:8px; align-items:center; margin-top:14px; }
+        .quiz-nav { width:auto; flex:1; text-align:center; }
+        .quiz-submit { border-color:var(--blue); background:var(--blue); color:white; font-weight:750; text-align:center; }
+        .quiz-result { text-align:center; padding:10px; }
+        .quiz-score { color:var(--blue); font-size:2.3em; line-height:1; font-weight:900; }
+        .flash-wrap { perspective:1000px; }
+        .flash-card { position:relative; min-height:230px; display:grid; place-items:center; padding:28px 22px;
+                      border-radius:24px; text-align:center; overflow:hidden; transition:transform .45s,background .25s;
+                      background:linear-gradient(145deg,#eef2ff,#f5f3ff); color:#172033; }
+        .flash-card.back { transform:rotateY(180deg); background:linear-gradient(145deg,#4f46e5,#6d28d9); color:white; }
+        .flash-card.back .flash-content { transform:rotateY(180deg); }
+        .flash-label { position:absolute; top:14px; inset-inline-start:16px; opacity:.62; font-size:.72em; font-weight:750; }
+        .flash-content { font-size:1.18em; font-weight:750; line-height:1.55; }
+        .flash-hint { position:absolute; bottom:13px; opacity:.55; font-size:.72em; }
+        .flash-controls { display:flex; gap:10px; align-items:center; margin-top:12px; }
+        .flash-nav { width:46px; height:42px; padding:0; text-align:center; }
+        .flash-count { flex:1; text-align:center; color:var(--muted); font-size:.82em; }
+        .plot-canvas { display:block; width:100%; height:240px; border-radius:17px; background:color-mix(in srgb,var(--surface) 70%,transparent); }
+        .plot-legend { display:flex; direction:ltr; flex-wrap:wrap; gap:7px 12px; margin-top:11px; }
+        .plot-row { direction:ltr; display:flex; align-items:center; gap:7px; font-size:.83em; color:var(--muted); }
+        .plot-dot { width:9px; height:9px; border-radius:50%; flex:none; }
+        @media (prefers-color-scheme:dark) { .flash-card { background:linear-gradient(145deg,#1e293b,#312e81); color:white; } }
         @keyframes pulse { 50% { opacity:.28; transform:translateY(-2px); } }
         @keyframes blink { 50% { opacity:0; } }
       </style>
       <script>$katexSource</script>
       <script>${sharedRendererScript()}
+        const quizState = Object.create(null);
+        const flashState = Object.create(null);
+
+        function renderQuiz(host, quiz, messageId) {
+          const questions = Array.isArray(quiz.questions) ? quiz.questions : [];
+          if (!questions.length) return;
+          const state = quizState[messageId] || (quizState[messageId] = { index:0, answers:{}, submitted:false });
+          const card = document.createElement('section');
+          card.className = 'tool-card';
+          host.appendChild(card);
+          function draw() {
+            const index = Math.max(0, Math.min(state.index, questions.length - 1));
+            const question = questions[index] || {};
+            if (state.submitted) {
+              let correct = 0;
+              questions.forEach(function(item, questionIndex) {
+                const answer = state.answers[questionIndex];
+                const type = item.type || 'mcq';
+                if (type === 'mcq' && Number(answer) === Number(item.correctAnswer)) correct += 1;
+                else if (type === 'fill' && String(answer || '').trim().toLowerCase() === String(item.correctAnswer || '').trim().toLowerCase()) correct += 1;
+                else if (type === 'open' && String(answer || '').trim()) correct += 1;
+              });
+              const percent = Math.round(correct * 100 / questions.length);
+              card.innerHTML = '<div class="tool-head"><h3 class="tool-title">' + escapeHtml(quiz.title || 'בוחן עם פיתי') +
+                '</h3><div class="tool-meta">התוצאות שלך</div></div><div class="tool-body quiz-result"><div class="quiz-score">' +
+                percent + '%</div><p>' + correct + ' תשובות מתוך ' + questions.length + '</p><button class="quiz-submit" data-reset>נסו שוב</button></div>';
+              card.querySelector('[data-reset]').addEventListener('click', function() {
+                state.index = 0; state.answers = {}; state.submitted = false; draw();
+              });
+              return;
+            }
+            card.innerHTML = '<div class="tool-head"><h3 class="tool-title">' + escapeHtml(quiz.title || 'בוחן עם פיתי') +
+              '</h3><div class="tool-meta">שאלה ' + (index + 1) + ' מתוך ' + questions.length + '</div></div>' +
+              '<div class="tool-body"><div class="quiz-question"></div><div class="quiz-options"></div><div class="quiz-controls">' +
+              '<button class="quiz-nav" data-prev>הקודמת</button><button class="quiz-nav" data-next>' +
+              (index === questions.length - 1 ? 'סיום' : 'הבאה') + '</button></div></div>';
+            card.querySelector('.quiz-question').innerHTML = renderMarkdown(question.question || '');
+            const options = card.querySelector('.quiz-options');
+            const type = question.type || 'mcq';
+            if (type === 'mcq') {
+              (question.answers || []).forEach(function(answer, answerIndex) {
+                const button = document.createElement('button');
+                button.className = 'quiz-option' + (Number(state.answers[index]) === answerIndex ? ' selected' : '');
+                button.innerHTML = renderMarkdown(answer || '');
+                button.addEventListener('click', function() { state.answers[index] = answerIndex; draw(); });
+                options.appendChild(button);
+              });
+            } else {
+              const input = document.createElement(type === 'open' ? 'textarea' : 'input');
+              input.className = 'quiz-answer';
+              input.value = state.answers[index] || '';
+              input.placeholder = type === 'open' ? 'כתבו את תשובתכם כאן…' : 'הקלידו את התשובה…';
+              input.addEventListener('input', function() { state.answers[index] = input.value; });
+              options.appendChild(input);
+            }
+            const previous = card.querySelector('[data-prev]');
+            previous.disabled = index === 0;
+            previous.addEventListener('click', function() { state.index = Math.max(0, index - 1); draw(); });
+            card.querySelector('[data-next]').addEventListener('click', function() {
+              if (index === questions.length - 1) state.submitted = true;
+              else state.index = index + 1;
+              draw();
+            });
+          }
+          draw();
+        }
+
+        function renderFlashcards(host, cards, messageId) {
+          if (!Array.isArray(cards) || !cards.length) return;
+          const state = flashState[messageId] || (flashState[messageId] = { index:0, flipped:false });
+          const wrapper = document.createElement('section');
+          wrapper.className = 'tool-card';
+          host.appendChild(wrapper);
+          function draw() {
+            const card = cards[state.index] || {};
+            const label = state.flipped ? 'תשובה / הגדרה' : 'שאלה / מושג';
+            const value = state.flipped ? card.back : card.front;
+            wrapper.innerHTML = '<div class="tool-head"><h3 class="tool-title">כרטיסיות עם פיתי</h3><div class="tool-meta">כרטיס ' +
+              (state.index + 1) + ' מתוך ' + cards.length + '</div></div><div class="tool-body flash-wrap"><button class="flash-card' +
+              (state.flipped ? ' back' : '') + '" data-flip><span class="flash-label">' + label + '</span><span class="flash-content"></span>' +
+              '<span class="flash-hint">לחצו להפיכה</span></button><div class="flash-controls"><button class="flash-nav" data-prev>‹</button>' +
+              '<span class="flash-count">' + (state.index + 1) + ' / ' + cards.length + '</span><button class="flash-nav" data-next>›</button></div></div>';
+            wrapper.querySelector('.flash-content').innerHTML = renderMarkdown(value || '');
+            wrapper.querySelector('[data-flip]').addEventListener('click', function() { state.flipped = !state.flipped; draw(); });
+            const previous = wrapper.querySelector('[data-prev]');
+            const next = wrapper.querySelector('[data-next]');
+            previous.disabled = state.index === 0;
+            next.disabled = state.index === cards.length - 1;
+            previous.addEventListener('click', function() { state.index -= 1; state.flipped = false; draw(); });
+            next.addEventListener('click', function() { state.index += 1; state.flipped = false; draw(); });
+          }
+          draw();
+        }
+
+        function renderPlot(host, plot) {
+          if (!plot || !Array.isArray(plot.functions) || !plot.functions.length) return;
+          const card = document.createElement('section');
+          card.className = 'tool-card';
+          card.innerHTML = '<div class="tool-head"><h3 class="tool-title">' + escapeHtml(plot.title || 'גרף פונקציות') +
+            '</h3><div class="tool-meta">' + escapeHtml(plot.subtitle || 'הפונקציות שביקשתם') +
+            '</div></div><div class="tool-body"><canvas class="plot-canvas"></canvas><div class="plot-legend"></div></div>';
+          const body = card.querySelector('.tool-body');
+          const legend = body.querySelector('.plot-legend');
+          const palette = ['#1473ff','#8b5cf6','#ef4444','#10b981','#f59e0b'];
+          plot.functions.forEach(function(fn, index) {
+            const color = /^#[0-9a-f]{3,8}$/i.test(fn.color || '') ? fn.color : palette[index % palette.length];
+            const row = document.createElement('div'); row.className = 'plot-row';
+            row.innerHTML = '<span class="plot-dot" style="background:' + color + '"></span><span>' + escapeHtml(fn.label || fn.expression || '') + '</span>';
+            legend.appendChild(row);
+          });
+          host.appendChild(card);
+          requestAnimationFrame(function() { drawFunctionPlot(body.querySelector('.plot-canvas'), plot, palette); });
+        }
+
+        function compilePlotExpression(expression) {
+          let value = String(expression || '').trim().toLowerCase();
+          if (!value || !/^[0-9a-z+\-*/^().,\s]+$/.test(value)) return null;
+          const names = value.match(/[a-z]+/g) || [];
+          const allowed = ['x','pi','e','sin','cos','tan','sqrt','abs','ln','log','exp','min','max','pow'];
+          if (names.some(function(name) { return allowed.indexOf(name) < 0; })) return null;
+          value = value.replace(/\^/g, '**').replace(/\bpi\b/g, 'Math.PI').replace(/\be\b/g, 'Math.E');
+          ['sin','cos','tan','sqrt','abs','exp','min','max','pow'].forEach(function(name) {
+            value = value.replace(new RegExp('\\b' + name + '\\b', 'g'), 'Math.' + name);
+          });
+          value = value.replace(/\bln\b/g, 'Math.log').replace(/\blog\b/g, 'Math.log10');
+          try { return new Function('x', '"use strict";return (' + value + ');'); } catch (_) { return null; }
+        }
+
+        function drawFunctionPlot(canvas, plot, palette) {
+          if (!canvas) return;
+          const ratio = Math.min(window.devicePixelRatio || 1, 2);
+          const width = Math.max(260, canvas.clientWidth || 320);
+          const height = 240;
+          canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+          const context = canvas.getContext('2d'); context.scale(ratio, ratio);
+          const xMin = Number.isFinite(Number(plot.xMin)) ? Number(plot.xMin) : -10;
+          const xMax = Number.isFinite(Number(plot.xMax)) ? Number(plot.xMax) : 10;
+          const compiled = plot.functions.map(function(fn) { return compilePlotExpression(fn.expression); });
+          const samples = [];
+          compiled.forEach(function(fn) {
+            const values = [];
+            for (let pixel = 0; pixel <= width; pixel += 2) {
+              const x = xMin + (xMax - xMin) * pixel / width;
+              let y = fn ? Number(fn(x)) : NaN;
+              if (!Number.isFinite(y) || Math.abs(y) > 1e7) y = NaN;
+              values.push([pixel, y]);
+            }
+            samples.push(values);
+          });
+          const finite = samples.flat().map(function(point) { return point[1]; }).filter(Number.isFinite).sort(function(a,b) { return a-b; });
+          let yMin = Number.isFinite(Number(plot.yMin)) ? Number(plot.yMin) : (finite.length ? finite[Math.floor(finite.length * .04)] : -10);
+          let yMax = Number.isFinite(Number(plot.yMax)) ? Number(plot.yMax) : (finite.length ? finite[Math.floor(finite.length * .96)] : 10);
+          if (!(yMax > yMin)) { yMin -= 1; yMax += 1; }
+          const toY = function(y) { return height - (y - yMin) * height / (yMax - yMin); };
+          context.clearRect(0,0,width,height); context.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--outline'); context.lineWidth = 1;
+          for (let step = 1; step < 5; step += 1) {
+            const px = width * step / 5, py = height * step / 5;
+            context.beginPath(); context.moveTo(px,0); context.lineTo(px,height); context.stroke();
+            context.beginPath(); context.moveTo(0,py); context.lineTo(width,py); context.stroke();
+          }
+          context.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted'); context.lineWidth = 1.4;
+          if (xMin <= 0 && xMax >= 0) { const axisX = (0-xMin)*width/(xMax-xMin); context.beginPath(); context.moveTo(axisX,0); context.lineTo(axisX,height); context.stroke(); }
+          if (yMin <= 0 && yMax >= 0) { const axisY = toY(0); context.beginPath(); context.moveTo(0,axisY); context.lineTo(width,axisY); context.stroke(); }
+          samples.forEach(function(values, index) {
+            const raw = plot.functions[index] || {};
+            context.strokeStyle = /^#[0-9a-f]{3,8}$/i.test(raw.color || '') ? raw.color : palette[index % palette.length];
+            context.lineWidth = 2.4; context.beginPath(); let drawing = false;
+            values.forEach(function(point) {
+              const py = toY(point[1]);
+              if (!Number.isFinite(py) || py < -height * 2 || py > height * 3) { drawing = false; return; }
+              if (!drawing) { context.moveTo(point[0], py); drawing = true; } else context.lineTo(point[0], py);
+            });
+            context.stroke();
+          });
+        }
+
         let pendingMessages = null;
         let messageFrame = 0;
         window.renderMessages = function(messages) {
@@ -346,6 +611,16 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             } else {
               bubble.innerHTML = renderMarkdown(message.text || '') + (message.streaming ? '<span class="cursor"></span>' : '');
             }
+            if (Array.isArray(message.attachments) && message.attachments.length) {
+              const attachments = document.createElement('div'); attachments.className = 'attachment-row';
+              message.attachments.forEach(function(name) {
+                const chip = document.createElement('span'); chip.className = 'attachment'; chip.textContent = '📎 ' + name; attachments.appendChild(chip);
+              });
+              bubble.appendChild(attachments);
+            }
+            if (message.quiz) renderQuiz(bubble, message.quiz, message.id || String(Math.random()));
+            if (message.flashcards) renderFlashcards(bubble, message.flashcards, message.id || String(Math.random()));
+            if (message.plot) renderPlot(bubble, message.plot);
             root.appendChild(bubble);
           });
           requestAnimationFrame(function() { window.scrollTo(0, document.body.scrollHeight); });
