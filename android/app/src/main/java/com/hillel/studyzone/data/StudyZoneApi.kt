@@ -582,15 +582,7 @@ class StudyZoneApi(context: Context) {
         onDone: (List<ToolCall>) -> Unit,
         onError: (Throwable) -> Unit
     ): Call {
-        val hebrewOnlyInstruction =
-            "הנחיית מערכת: ענה תמיד בעברית בלבד. אם המשתמש כותב בשפה אחרת, הסבר בעברית. " +
-                "מותר להשאיר סימון מתמטי, שמות פונקציות, קוד קצר ומונחים טכניים שאי אפשר לתרגם, אבל כל ההסבר וה-UI חייבים להיות בעברית."
         val contents = JSONArray().apply {
-            put(
-                JSONObject()
-                    .put("role", "user")
-                    .put("parts", JSONArray().put(JSONObject().put("text", hebrewOnlyInstruction)))
-            )
             val visibleMessages = messages
                 .filter { it.second.isNotBlank() }
                 .takeLast(18)
@@ -620,7 +612,6 @@ class StudyZoneApi(context: Context) {
                 "serverPromptContext",
                 JSONObject()
                     .put("courseName", course?.title ?: "StudyZone")
-                    .put("languagePolicy", hebrewOnlyInstruction)
                     .put("currentContext", lesson?.let { "${it.title} (${it.sectionId})" } ?: "מסך הקורסים")
                     .put(
                         "userMemories",
