@@ -27,7 +27,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,7 +53,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
@@ -115,9 +115,9 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -302,26 +302,36 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
                         val physical = (x / (widthPx.toFloat() / tabs.size)).toInt().coerceIn(0, tabs.lastIndex)
                         return if (direction == LayoutDirection.Rtl) tabs.lastIndex - physical else physical
                     }
-                    detectHorizontalDragGestures(
-                        onDragStart = { start ->
-                            dragging = true
-                            pointerX = start.x.coerceIn(0f, widthPx.toFloat())
-                        },
-                        onHorizontalDrag = { change, _ ->
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        dragging = true
+                        pointerX = down.position.x.coerceIn(0f, widthPx.toFloat())
+                        var finished = false
+                        while (!finished) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change == null) {
+                                visualIndex = activeIndex
+                                dragging = false
+                                finished = true
+                                continue
+                            }
                             pointerX = change.position.x.coerceIn(0f, widthPx.toFloat())
                             change.consume()
-                        },
-                        onDragEnd = {
-                            val next = logicalIndexAt(pointerX)
-                            visualIndex = next
-                            dragging = false
-                            onTab(tabs[next].first)
-                        },
-                        onDragCancel = {
-                            visualIndex = activeIndex
-                            dragging = false
+                            if (!change.pressed) {
+                                if (event.type == PointerEventType.Release) {
+                                    val next = logicalIndexAt(pointerX)
+                                    visualIndex = next
+                                    dragging = false
+                                    onTab(tabs[next].first)
+                                } else {
+                                    visualIndex = activeIndex
+                                    dragging = false
+                                }
+                                finished = true
+                            }
                         }
-                    )
+                    }
                 }
         ) {
             if (indicatorWidth > 0.dp) {
@@ -343,14 +353,6 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
                     Column(
                         Modifier.weight(1f).height(58.dp)
                             .clip(RoundedCornerShape(22.dp))
-                            .selectable(
-                                selected = selected,
-                                onClick = {
-                                    visualIndex = tabs.indexOf(item)
-                                    onTab(item.first)
-                                },
-                                role = Role.Tab
-                            )
                             .padding(horizontal = 2.dp, vertical = 7.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center

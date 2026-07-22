@@ -1,14 +1,16 @@
 # StudyZone for Android
 
-האפליקציה היא מעטפת Android דקה שמריצה build מקומי של ממשק ה־React מתוך ה־APK.
-היא אינה טוענת את אתר StudyZone ואינה מכילה fallback לפרונטנד מרוחק. גישה לרשת
-מותרת רק ל־API ולשירותי משתמש כגון התחברות, סנכרון ופיתי.
+האפליקציה עצמה היא אפליקציית Kotlin + Compose מקומית. מסכי הבית, כרטיסי הקורסים,
+החיפוש, הפרופיל, ההגדרות, ההתחברות ופיתי אינם React ואינם WebView. רק לאחר פתיחת
+קורס מופעל renderer מקומי ייעודי של תוכן השיעורים והבחנים מתוך ה־APK.
+הוא אינו כולל את App, מסכי החשבון, הניווט או הצ'אט של גרסת הדפדפן.
 
 ## מבנה
 
-- `MainActivity.kt` — WebView יחיד וארוך־חיים, system splash, בחירת קבצים ו־bridge מצומצם.
-- `../android.html` — נקודת הכניסה המקומית עם CSP ייעודי לאפליקציה.
-- `app/src/main/assets/` — bundle מקומי של React שמצורף ל־APK ונבנה ב־repository הראשי.
+- `MainActivity.kt` — שורש Compose המקומי וכל הניווט של האפליקציה.
+- `LocalCourseWebView.kt` — WebView תחום למסך קורס בלבד.
+- `app/src/main/assets/android.html` — נקודת כניסה ייעודית ל־CourseRenderer בלבד.
+- `app/src/main/assets/assets/` — רכיבי תוכן הקורסים והבחנים המקומיים.
 - `res/` — אייקון adaptive/monochrome, splash וערכות יום/לילה.
 
 הקבצים מוגשים דרך `WebViewAssetLoader` תחת
@@ -30,8 +32,8 @@ cd android
 STUDYZONE_API_URL=https://your-api.example.com
 ```
 
-אין property לכתובת אתר. `MainActivity` חוסמת במפורש את hosts הישנים של
-הפרונטנד, וקישור חיצוני אחר יכול לצאת לדפדפן רק בעקבות gesture של המשתמש.
+אין property לכתובת אתר. ה־WebView של הקורס מאפשר ניווט ראשי רק ב־origin המקומי
+`appassets.androidplatform.net`; הוא לא יכול לנווט לפרונטנד מרוחק.
 
 ## CI ואבטחה
 

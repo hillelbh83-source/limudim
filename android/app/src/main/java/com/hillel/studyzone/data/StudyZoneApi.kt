@@ -801,7 +801,7 @@ private fun JSONObject.toLesson() = Lesson(
     sectionId = optString("sectionId"),
     title = optString("title"),
     content = normalizeLessonContent(optString("content")),
-    interactiveUrl = optString("interactiveUrl"),
+    interactiveUrl = "",
     previousSectionId = optNullableString("previousSectionId"),
     nextSectionId = optNullableString("nextSectionId")
 )

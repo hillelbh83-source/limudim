@@ -25,7 +25,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
-import java.io.ByteArrayInputStream
 
 /**
  * Displays only an opened course with the local React renderer bundled in the APK.
@@ -64,8 +63,8 @@ fun LocalCourseWebView(
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(courseWebView, true)
             }
-            webViewClient = LocalCourseClient(loader, context.assets, onBack)
-            loadUrl(LOCAL_COURSE_URL + "#" + Uri.encode(courseId))
+            webViewClient = LocalCourseClient(loader, context.assets)
+            loadUrl(LOCAL_COURSE_URL + "?course=" + Uri.encode(courseId))
         }
     }
 
@@ -95,14 +94,10 @@ fun LocalCourseWebView(
 
 private class LocalCourseClient(
     private val loader: WebViewAssetLoader,
-    private val assets: android.content.res.AssetManager,
-    private val onCourseClosed: () -> Unit
+    private val assets: android.content.res.AssetManager
 ) : WebViewClient() {
-    private var coursePageVisible = false
-
     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
         val uri = request?.url ?: return null
-        if (uri.host in BLOCKED_FRONTEND_HOSTS) return emptyResponse()
         loader.shouldInterceptRequest(uri)?.let { return it }
         if (uri.host != LOCAL_HOST) return null
         val path = uri.path.orEmpty().removePrefix("/")
@@ -119,29 +114,9 @@ private class LocalCourseClient(
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val uri = request?.url ?: return true
-        if (uri.host in BLOCKED_FRONTEND_HOSTS) return true
         return uri.host != LOCAL_HOST
     }
-
-    override fun onPageFinished(view: WebView?, url: String?) {
-        coursePageVisible = true
-        view?.evaluateJavascript(EMBEDDED_COURSE_CSS, null)
-    }
-
-    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-        super.doUpdateVisitedHistory(view, url, isReload)
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
-        if (coursePageVisible && uri.host == LOCAL_HOST && uri.fragment.isNullOrBlank()) {
-            view?.post { onCourseClosed() }
-        }
-    }
 }
-
-private fun emptyResponse() = WebResourceResponse(
-    "text/plain",
-    "UTF-8",
-    ByteArrayInputStream(ByteArray(0))
-)
 
 private fun mimeType(path: String): String {
     val extension = path.substringAfterLast('.', "").lowercase()
@@ -159,18 +134,3 @@ private fun mimeType(path: String): String {
 
 private const val LOCAL_HOST = "appassets.androidplatform.net"
 private const val LOCAL_COURSE_URL = "https://" + LOCAL_HOST + "/app/android.html"
-private val BLOCKED_FRONTEND_HOSTS = setOf("yhnz", "i9d8").mapTo(mutableSetOf()) { suffix ->
-    listOf("studyzone", "1", suffix).joinToString("-") + ".onrender.com"
-}
-private val EMBEDDED_COURSE_CSS = """
-    (function () {
-      document.documentElement.dataset.embeddedCourse = 'true';
-      var style = document.getElementById('studyzone-native-course-style');
-      if (!style) {
-        style = document.createElement('style');
-        style.id = 'studyzone-native-course-style';
-        style.textContent = '.android-bottom-nav,#pythi-chat-toggle,#pythi-chat-window,.android-toast-container{display:none!important}body{padding-bottom:0!important}';
-        document.head.appendChild(style);
-      }
-    })();
-""".trimIndent()
