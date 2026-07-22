@@ -375,9 +375,10 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .attachment { max-width:190px; padding:5px 9px; border-radius:999px; background:#ffffff22;
                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.78em; }
         .tool-card { width:100%; margin:12px 0 4px; overflow:hidden; border:1px solid var(--outline);
-                     border-radius:24px; background:color-mix(in srgb,var(--surface) 78%,transparent);
-                     box-shadow:0 16px 45px -34px #0f172aaa; }
-        .tool-head { padding:14px 16px; border-bottom:1px solid var(--outline); background:#ffffff08; }
+                     border-radius:20px; background:var(--surface); color:var(--fg);
+                     box-shadow:0 10px 28px -24px #0f172a99; }
+        .tool-head { padding:14px 16px; border-bottom:1px solid var(--outline);
+                     background:color-mix(in srgb,var(--surface) 88%,var(--fg) 12%); }
         .tool-title { margin:0; font-size:1.05em; font-weight:800; }
         .tool-meta { margin-top:3px; color:var(--muted); font-size:.8em; }
         .tool-body { padding:16px; }
@@ -397,23 +398,25 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .quiz-submit { border-color:var(--blue); background:var(--blue); color:white; font-weight:750; text-align:center; }
         .quiz-result { text-align:center; padding:10px; }
         .quiz-score { color:var(--blue); font-size:2.3em; line-height:1; font-weight:900; }
-        .flash-wrap { perspective:1000px; }
-        .flash-card { position:relative; min-height:230px; display:grid; place-items:center; padding:28px 22px;
-                      border-radius:24px; text-align:center; overflow:hidden; transition:transform .45s,background .25s;
-                      background:linear-gradient(145deg,#eef2ff,#f5f3ff); color:#172033; }
-        .flash-card.back { transform:rotateY(180deg); background:linear-gradient(145deg,#4f46e5,#6d28d9); color:white; }
-        .flash-card.back .flash-content { transform:rotateY(180deg); }
-        .flash-label { position:absolute; top:14px; inset-inline-start:16px; opacity:.62; font-size:.72em; font-weight:750; }
-        .flash-content { font-size:1.18em; font-weight:750; line-height:1.55; }
-        .flash-hint { position:absolute; bottom:13px; opacity:.55; font-size:.72em; }
+        .flash-wrap { width:100%; }
+        .flash-card { appearance:none; position:relative; width:100%; min-height:190px; display:grid;
+                      place-items:center; padding:44px 22px 38px; border:1px solid color-mix(in srgb,var(--blue) 32%,var(--outline));
+                      border-radius:20px; text-align:center; overflow:hidden; cursor:pointer;
+                      transition:background .18s ease,box-shadow .18s ease;
+                      background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 92%,var(--blue) 8%),var(--surface));
+                      color:var(--fg); font:inherit; box-shadow:inset 0 1px 0 #ffffff12; }
+        .flash-card.back { background:linear-gradient(145deg,#2563eb,#4338ca); color:white; border-color:transparent; }
+        .flash-label { position:absolute; top:14px; inset-inline-start:16px; opacity:.72; font-size:.72em; font-weight:800; }
+        .flash-content { width:100%; font-size:1.16em; font-weight:750; line-height:1.55; overflow-wrap:anywhere; }
+        .flash-hint { position:absolute; bottom:13px; opacity:.65; font-size:.72em; }
         .flash-controls { display:flex; gap:10px; align-items:center; margin-top:12px; }
-        .flash-nav { width:46px; height:42px; padding:0; text-align:center; }
+        .flash-nav { width:42px; height:42px; padding:0; border-radius:50%; text-align:center; font-size:1.25em; }
         .flash-count { flex:1; text-align:center; color:var(--muted); font-size:.82em; }
         .plot-canvas { display:block; width:100%; height:240px; border-radius:17px; background:color-mix(in srgb,var(--surface) 70%,transparent); }
         .plot-legend { display:flex; direction:ltr; flex-wrap:wrap; gap:7px 12px; margin-top:11px; }
         .plot-row { direction:ltr; display:flex; align-items:center; gap:7px; font-size:.83em; color:var(--muted); }
         .plot-dot { width:9px; height:9px; border-radius:50%; flex:none; }
-        ${if (palette.dark) ".flash-card { background:linear-gradient(145deg,#1e293b,#312e81); color:white; }" else ""}
+        ${if (palette.dark) ".flash-card:not(.back) { background:linear-gradient(145deg,#172033,#25235a); color:var(--fg); }" else ""}
         @keyframes pulse { 50% { opacity:.28; transform:translateY(-2px); } }
         @keyframes blink { 50% { opacity:0; } }
       </style>

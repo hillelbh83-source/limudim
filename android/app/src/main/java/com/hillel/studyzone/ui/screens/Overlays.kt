@@ -6,7 +6,6 @@ import android.net.Uri
 import android.view.MotionEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -126,6 +125,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
@@ -707,7 +707,11 @@ private fun PythiComposer(
                 value = input,
                 onValueChange = onInput,
                 modifier = fieldModifier.fillMaxWidth().focusRequester(focusRequester),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = contentColor, textAlign = TextAlign.Right),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = contentColor,
+                    textAlign = TextAlign.Right,
+                    textDirection = TextDirection.Rtl
+                ),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(StudyBlue),
                 minLines = 1,
                 maxLines = 5,
@@ -735,14 +739,13 @@ private fun PythiComposer(
                 .clip(shape)
                 .background(composerColor)
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .7f), shape)
-                .animateContentSize(spring(dampingRatio = .9f, stiffness = 620f))
                 .padding(horizontal = 8.dp, vertical = 7.dp)
         ) {
             // Keep the same BasicTextField instance in the composition while the composer grows.
             // Recreating it after the first character used to drop focus and dismiss typing.
             Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (!expanded) {
-                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
+                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", onVoice, contentColor)
                 }
                 field(
                     Modifier.weight(1f)
@@ -750,13 +753,11 @@ private fun PythiComposer(
                         .padding(horizontal = if (expanded) 8.dp else 6.dp, vertical = if (expanded) 6.dp else 0.dp)
                 )
                 if (!expanded) {
-                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", onVoice, contentColor)
+                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
                 }
             }
             if (expanded) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
-                    Spacer(Modifier.weight(1f))
                     ComposerIcon(
                         if (streaming) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
                         if (streaming) "עצירת התשובה" else "שליחה",
@@ -764,6 +765,8 @@ private fun PythiComposer(
                         Color.White,
                         background = if (streaming) MaterialTheme.colorScheme.error else StudyBlue
                     )
+                    Spacer(Modifier.weight(1f))
+                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
                 }
             }
         }

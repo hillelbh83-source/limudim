@@ -54,7 +54,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
@@ -140,7 +140,13 @@ class MainActivity : ComponentActivity() {
     fun launchGoogleSignIn() {
         lifecycleScope.launch {
             runCatching {
-                val option = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
+                // Request all accounts explicitly. The dedicated button option is reported as a
+                // cancellation on some Play Services/device combinations before its UI opens.
+                val option = GetGoogleIdOption.Builder()
+                    .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .setFilterByAuthorizedAccounts(false)
+                    .setAutoSelectEnabled(false)
+                    .build()
                 val credential = CredentialManager.create(this@MainActivity).getCredential(
                     context = this@MainActivity,
                     request = GetCredentialRequest.Builder().addCredentialOption(option).build()
@@ -153,7 +159,8 @@ class MainActivity : ComponentActivity() {
                 .onFailure { error ->
                     viewModel.showMessage(
                         when {
-                            error is GetCredentialCancellationException -> "ההתחברות עם Google בוטלה"
+                            error is GetCredentialCancellationException ->
+                                "Google לא הצליחה לפתוח את בחירת החשבון. בדקו ש-Google Play Services מעודכן ונסו שוב"
                             error is NoCredentialException -> "לא נמצא חשבון Google זמין במכשיר"
                             error.javaClass.simpleName.contains("Configuration", ignoreCase = true) ->
                                 "Google עדיין לא מזהה את חתימת האפליקציה. יש לעדכן את SHA-1 ב-Google Auth Platform"
