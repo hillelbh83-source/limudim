@@ -1,355 +1,355 @@
 package com.hillel.studyzone
 
-import android.Manifest
-import android.app.DownloadManager
-import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Color
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.util.Base64
-import android.view.HapticFeedbackConstants
-import android.view.View
 import android.view.WindowManager
-import android.webkit.CookieManager
-import android.webkit.DownloadListener
-import android.webkit.JavascriptInterface
-import android.webkit.MimeTypeMap
-import android.webkit.PermissionRequest
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
-import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import androidx.activity.viewModels
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.unit.LayoutDirection.Rtl
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.webkit.WebViewAssetLoader
-import java.io.ByteArrayInputStream
-import java.io.File
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.hillel.studyzone.model.RootTab
+import com.hillel.studyzone.model.ThemeMode
+import com.hillel.studyzone.ui.screens.AdminScreen
+import com.hillel.studyzone.ui.screens.AuthOverlay
+import com.hillel.studyzone.ui.screens.BottomGlassNav
+import com.hillel.studyzone.ui.screens.ChatOverlay
+import com.hillel.studyzone.ui.screens.CourseDetailScreen
+import com.hillel.studyzone.ui.screens.CoursesScreen
+import com.hillel.studyzone.ui.screens.IntroSplash
+import com.hillel.studyzone.ui.screens.ThemeRevealOverlay
+import com.hillel.studyzone.ui.screens.LessonScreen
+import com.hillel.studyzone.ui.screens.ProfileScreen
+import com.hillel.studyzone.ui.screens.SavedScreen
+import com.hillel.studyzone.ui.screens.SearchScreen
+import com.hillel.studyzone.ui.components.LocalHapticsEnabled
+import com.hillel.studyzone.ui.components.LocalCourseWebView
+import com.hillel.studyzone.ui.theme.StudyZoneTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private lateinit var webView: WebView
-    private lateinit var assetLoader: WebViewAssetLoader
-    private var fileCallback: ValueCallback<Array<Uri>>? = null
-    private var pendingMediaPermission: PermissionRequest? = null
-
-    private val filePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        fileCallback?.onReceiveValue(uris.toTypedArray())
-        fileCallback = null
-    }
-
-    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        val request = pendingMediaPermission
-        pendingMediaPermission = null
-        if (request == null) return@registerForActivityResult
-        if (granted) request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else request.deny()
-    }
-
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val viewModel: AppViewModel by viewModels()
+    private var activeIntent by mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        activeIntent = intent
         enableEdgeToEdge()
+        // The system splash only bridges process startup to the first Compose frame. It never
+        // waits for the server, and exits into the in-app reveal with a short GPU-only animation.
         splash.setOnExitAnimationListener { provider ->
             provider.view.animate()
                 .alpha(0f)
-                .scaleX(1.03f)
-                .scaleY(1.03f)
+                .scaleX(1.035f)
+                .scaleY(1.035f)
                 .setDuration(170L)
                 .withEndAction { provider.remove() }
                 .start()
         }
-
-        assetLoader = WebViewAssetLoader.Builder()
-            .addPathHandler("/app/", WebViewAssetLoader.AssetsPathHandler(this))
-            .build()
-
-        webView = WebView(this)
-        configureWebView(webView)
-        setContentView(webView)
-
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() = handleWebBack()
-        })
-
-        if (savedInstanceState == null) {
-            webView.loadUrl(localUrlForIntent(intent))
-        } else {
-            webView.restoreState(savedInstanceState)
+        setContent {
+            // A single collected snapshot drives both the theme and the screen. Keeping these in
+            // the same composition frame prevents the icon from changing before the palette.
+            val state by viewModel.state.collectAsStateWithLifecycle()
+            StudyZoneTheme(state.settings.themeMode, state.settings.fontScale) {
+                CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalLayoutDirection provides Rtl,
+                    LocalHapticsEnabled provides state.settings.haptics
+                ) {
+                    StudyZoneRoot(viewModel, state, activeIntent)
+                }
+            }
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (::webView.isInitialized) webView.loadUrl(localUrlForIntent(intent))
+        activeIntent = intent
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        if (::webView.isInitialized) webView.saveState(outState)
-        super.onSaveInstanceState(outState)
-    }
-
-    override fun onDestroy() {
-        fileCallback?.onReceiveValue(null)
-        fileCallback = null
-        pendingMediaPermission?.deny()
-        pendingMediaPermission = null
-        if (::webView.isInitialized) {
-            webView.stopLoading()
-            webView.removeJavascriptInterface(BRIDGE_NAME)
-            webView.destroy()
-        }
-        super.onDestroy()
-    }
-
-    @Suppress("SetJavaScriptEnabled")
-    private fun configureWebView(view: WebView) {
-        view.setBackgroundColor(Color.TRANSPARENT)
-        view.alpha = 0f
-        view.overScrollMode = View.OVER_SCROLL_NEVER
-        view.isVerticalScrollBarEnabled = false
-        view.isHorizontalScrollBarEnabled = false
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-
-        view.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            allowFileAccess = false
-            allowContentAccess = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            cacheMode = WebSettings.LOAD_DEFAULT
-            loadsImagesAutomatically = true
-            mediaPlaybackRequiresUserGesture = true
-            setSupportZoom(false)
-            builtInZoomControls = false
-            displayZoomControls = false
-            userAgentString = "$userAgentString StudyZoneAndroid/${BuildConfig.VERSION_NAME}"
-        }
-
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(view, true)
-        }
-
-        view.addJavascriptInterface(AndroidBridge(), BRIDGE_NAME)
-        view.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                val uri = request?.url ?: return null
-                if (uri.host in BLOCKED_FRONTEND_HOSTS) return emptyResponse()
-                assetLoader.shouldInterceptRequest(uri)?.let { return it }
-                return openRootBundledAsset(uri)
-            }
-
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val target = request?.url ?: return true
-                if (target.host == LOCAL_HOST) return false
-                if (target.host in BLOCKED_FRONTEND_HOSTS) return true
-
-                if ((target.scheme == "https" || target.scheme == "http") && request.isForMainFrame) {
-                    if (request.hasGesture()) {
-                        runCatching { startActivity(Intent(Intent.ACTION_VIEW, target)) }
-                    }
-                    return true
+    fun launchGoogleSignIn() {
+        lifecycleScope.launch {
+            runCatching {
+                val googleOption = GetGoogleIdOption.Builder()
+                    .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .setFilterByAuthorizedAccounts(false)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleOption)
+                    .build()
+                val credential = CredentialManager.create(this@MainActivity)
+                    .getCredential(this@MainActivity, request)
+                    .credential
+                if (
+                    credential !is CustomCredential ||
+                    credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                ) {
+                    error("Google לא החזירה פרטי התחברות תקינים")
                 }
-                return target.scheme != "https" && target.scheme != "http"
-            }
+                GoogleIdTokenCredential.createFrom(credential.data).idToken
+            }.onSuccess(viewModel::loginWithGoogle)
+                .onFailure { viewModel.showMessage("ההתחברות עם Google בוטלה או נכשלה") }
+        }
+    }
+}
 
-            override fun onPageCommitVisible(view: WebView?, url: String?) {
-                view?.animate()?.alpha(1f)?.setDuration(170L)?.start()
+@Composable
+private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.model.UiState, launchIntent: Intent?) {
+    val context = LocalContext.current
+    val systemDark = isSystemInDarkTheme()
+    val resolvedDark = when (state.settings.themeMode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+    }
+    var introVisible by rememberSaveable { mutableStateOf(true) }
+    var handledDeepLink by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingAdminExport by remember { mutableStateOf<String?>(null) }
+    val adminExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingAdminExport
+        if (uri != null && content != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
             }
         }
+        pendingAdminExport = null
+        viewModel.consumeAdminExport()
+    }
 
-        view.webChromeClient = object : WebChromeClient() {
-            override fun onShowFileChooser(
-                webView: WebView?,
-                callback: ValueCallback<Array<Uri>>?,
-                params: FileChooserParams?
-            ): Boolean {
-                fileCallback?.onReceiveValue(null)
-                fileCallback = callback
-                val accepted = params?.acceptTypes
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
-                    ?.toTypedArray()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: arrayOf("*/*")
-                filePicker.launch(accepted)
-                return true
+    LaunchedEffect(Unit) {
+        // Let real content draw underneath first, then play a brief branded hand-off. Network and
+        // DataStore work continue independently and can never prolong this animation.
+        withFrameNanos { }
+        delay(if (state.settings.reduceMotion) 80 else 620)
+        introVisible = false
+    }
+
+    LaunchedEffect(state.toast) {
+        if (state.toast != null) {
+            delay(2800)
+            viewModel.consumeToast()
+        }
+    }
+
+    LaunchedEffect(state.adminExportJson) {
+        val json = state.adminExportJson ?: return@LaunchedEffect
+        if (pendingAdminExport == null) {
+            pendingAdminExport = json
+            adminExportLauncher.launch("gemini-server-keys-${System.currentTimeMillis()}.json")
+        }
+    }
+
+    LaunchedEffect(state.courses, launchIntent?.dataString) {
+        val deepLink = launchIntent?.dataString ?: return@LaunchedEffect
+        if (handledDeepLink == deepLink) return@LaunchedEffect
+        val uri = launchIntent?.data ?: return@LaunchedEffect
+        if (state.courses.isEmpty()) return@LaunchedEffect
+        val courseId = uri.host ?: uri.pathSegments.firstOrNull()
+        val sectionId = if (uri.host != null) uri.pathSegments.firstOrNull() else uri.pathSegments.getOrNull(1)
+        if (state.courses.none { it.id == courseId }) return@LaunchedEffect
+        handledDeepLink = deepLink
+        viewModel.handleDeepLink(courseId, sectionId)
+    }
+
+    DisposableEffect(state.settings.keepScreenOn) {
+        val activity = context as? ComponentActivity
+        if (state.settings.keepScreenOn) activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            if (state.settings.keepScreenOn) {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
+        }
+    }
 
-            override fun onPermissionRequest(request: PermissionRequest?) {
-                if (request == null) return
-                runOnUiThread {
-                    val wantsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
-                    if (!wantsAudio) {
-                        request.deny()
-                        return@runOnUiThread
-                    }
-                    if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-                    } else {
-                        pendingMediaPermission?.deny()
-                        pendingMediaPermission = request
-                        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-                    }
+    val selectedCourse = state.selectedCourse
+
+    val hasBackDestination = introVisible || state.adminOpen || state.authOpen ||
+        state.chatOpen || state.lesson != null || state.lessonLoading || state.selectedCourse != null
+    BackHandler(enabled = hasBackDestination) {
+        when {
+            introVisible -> introVisible = false
+            state.adminOpen -> viewModel.closeAdmin()
+            state.authOpen -> viewModel.setAuthOpen(false)
+            state.chatExpanded -> viewModel.setChatExpanded(false)
+            state.chatOpen -> viewModel.setChatOpen(false)
+            state.lesson != null || state.lessonLoading -> viewModel.closeLesson()
+            state.selectedCourse != null -> viewModel.closeCourse()
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        when {
+            state.error != null && state.courses.isEmpty() -> ErrorState(state.error.orEmpty(), viewModel::bootstrap)
+            selectedCourse != null -> LocalCourseWebView(
+                courseId = selectedCourse.id,
+                onBack = viewModel::closeCourse
+            )
+            state.lesson != null || state.lessonLoading -> LessonScreen(
+                state = state,
+                onBack = viewModel::closeLesson,
+                onBookmark = viewModel::toggleBookmark,
+                onCompleted = viewModel::toggleCompleted,
+                onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
+                onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) }
+            )
+            else -> AnimatedContent(targetState = state.rootTab, label = "rootTab") { tab ->
+                when (tab) {
+                    RootTab.COURSES -> CoursesScreen(
+                        state,
+                        onCourse = viewModel::openCourse,
+                        onProfile = { viewModel.selectTab(RootTab.PROFILE) },
+                        darkMode = resolvedDark,
+                        onThemeToggle = {
+                            // SYSTEM means the current phone palette, so the first tap must always
+                            // create a visible change instead of merely replacing SYSTEM with DARK.
+                            viewModel.setTheme(if (resolvedDark) ThemeMode.LIGHT else ThemeMode.DARK)
+                        }
+                    )
+                    RootTab.SEARCH -> SearchScreen(state, viewModel::setSearchQuery, viewModel::openLesson)
+                    RootTab.SAVED -> SavedScreen(state, viewModel::openLesson)
+                    RootTab.PROFILE -> ProfileScreen(
+                        state,
+                        onAuth = { viewModel.setAuthOpen(true) },
+                        onLogout = viewModel::logout,
+                        onAdmin = viewModel::openAdmin,
+                        onTheme = viewModel::setTheme,
+                        onReduceMotion = viewModel::setReduceMotion,
+                        onHaptics = viewModel::setHaptics,
+                        onFontScale = viewModel::setFontScale,
+                        onKeepScreenOn = viewModel::setKeepScreenOn
+                    )
                 }
             }
-
-            override fun onPermissionRequestCanceled(request: PermissionRequest?) {
-                if (pendingMediaPermission === request) pendingMediaPermission = null
-            }
         }
 
-        view.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            if (!url.startsWith("https://")) return@DownloadListener
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setMimeType(mimeType)
-                .addRequestHeader("User-Agent", userAgent)
-                .addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url).orEmpty())
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, URLUtilCompat.fileName(url, contentDisposition, mimeType))
-            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-        })
-    }
-
-    private fun openRootBundledAsset(uri: Uri): WebResourceResponse? {
-        if (uri.host != LOCAL_HOST) return null
-        val relativePath = uri.path.orEmpty().removePrefix("/")
-        if (relativePath.isBlank() || relativePath.startsWith("app/")) return null
-        return runCatching {
-            val mime = mimeTypeFor(relativePath)
-            WebResourceResponse(mime, if (mime.startsWith("text/") || mime.contains("javascript")) "UTF-8" else null, assets.open(relativePath))
-        }.getOrNull()
-    }
-
-    private fun handleWebBack() {
-        val script = """
-            (function() {
-              var chat = document.getElementById('pythi-chat-window');
-              if (chat) {
-                var toggle = document.getElementById('pythi-chat-toggle');
-                if (toggle) toggle.click();
-                return 'handled';
-              }
-              window.__studyZoneAndroidBackHandled = false;
-              window.dispatchEvent(new Event('StudyZone:androidBack'));
-              if (window.__studyZoneAndroidBackHandled) return 'handled';
-              if (location.hash && location.hash !== '#') {
-                history.back();
-                return 'handled';
-              }
-              return 'exit';
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(script) { result ->
-            if (result == "\"exit\"") finish()
+        if (selectedCourse == null && state.lesson == null && !state.lessonLoading && !state.adminOpen && !state.chatOpen) {
+            BottomGlassNav(
+                active = state.rootTab,
+                onTab = viewModel::selectTab,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
+            )
         }
-    }
 
-    private fun localUrlForIntent(intent: Intent?): String {
-        val uri = intent?.data ?: return LOCAL_URL
-        if (uri.scheme != "studyzone") return LOCAL_URL
-        val courseId = uri.host ?: uri.pathSegments.firstOrNull() ?: return LOCAL_URL
-        val remaining = if (uri.host != null) uri.pathSegments else uri.pathSegments.drop(1)
-        val route = (listOf(courseId) + remaining).joinToString("/") { Uri.encode(it) }
-        return "$LOCAL_URL#$route"
-    }
-
-    private inner class AndroidBridge {
-        @JavascriptInterface
-        fun haptic(kind: String) {
-            runOnUiThread {
-                val feedback = when (kind) {
-                    "success" -> HapticFeedbackConstants.CONFIRM
-                    "warning" -> HapticFeedbackConstants.REJECT
-                    else -> HapticFeedbackConstants.CLOCK_TICK
+        if (!state.adminOpen && !state.authOpen) {
+            ChatOverlay(
+                state = state,
+                onOpen = viewModel::setChatOpen,
+                onExpanded = viewModel::setChatExpanded,
+                onInput = viewModel::setChatInput,
+                onSend = viewModel::sendChat,
+                onStop = viewModel::stopChat,
+                onClear = viewModel::clearChat,
+                modifier = if (state.chatOpen) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp)
                 }
-                webView.performHapticFeedback(feedback)
+            )
+        }
+
+        AuthOverlay(
+            visible = state.authOpen,
+            loading = state.authLoading,
+            onDismiss = { viewModel.setAuthOpen(false) },
+            onLogin = viewModel::login,
+            onRegister = viewModel::register,
+            onGoogleLogin = { (context as? MainActivity)?.launchGoogleSignIn() }
+        )
+
+        AnimatedVisibility(state.adminOpen, enter = fadeIn() + scaleIn(initialScale = .96f), exit = fadeOut() + scaleOut(targetScale = .96f)) {
+            AdminScreen(
+                state,
+                onClose = viewModel::closeAdmin,
+                onReload = viewModel::loadAdmin,
+                onSelectUser = viewModel::selectAdminUser,
+                onToggleBlock = viewModel::toggleUserBlock,
+                onDeleteUser = viewModel::deleteAdminUser,
+                onSendMessage = viewModel::sendAdminMessage,
+                onLoadRequests = viewModel::loadAdminRequests,
+                onAccess = viewModel::handleAccessRequest,
+                onTogglePublic = viewModel::togglePublicCourse,
+                onClearPublic = viewModel::clearPublicCourses,
+                onSettings = viewModel::updateAdminSettings,
+                onCreateKey = viewModel::createGeminiKey,
+                onUpdateKey = viewModel::updateGeminiKey,
+                onClearCooldown = viewModel::clearGeminiCooldown,
+                onDeleteKey = viewModel::deleteGeminiKey,
+                onExportKeys = viewModel::exportGeminiKeys,
+                onPassword = viewModel::updateSystemPassword
+            )
+        }
+
+        AnimatedVisibility(
+            visible = state.toast != null,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp, start = 18.dp, end = 18.dp),
+            enter = fadeIn() + scaleIn(initialScale = .9f),
+            exit = fadeOut() + scaleOut(targetScale = .9f)
+        ) {
+            Snackbar(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface) {
+                Text(state.toast.orEmpty())
             }
         }
 
-        @JavascriptInterface
-        fun setKeepScreenOn(enabled: Boolean) {
-            runOnUiThread {
-                if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        IntroSplash(introVisible)
+        if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background)
+    }
+}
+
+@Composable
+private fun ErrorState(message: String, onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        com.hillel.studyzone.ui.components.GlassSurface(Modifier.padding(22.dp)) {
+            androidx.compose.foundation.layout.Column(Modifier.padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("לא הצלחנו לטעון את StudyZone", style = MaterialTheme.typography.titleLarge)
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp))
+                com.hillel.studyzone.ui.components.Pressable(onClick = onRetry, selected = true) { Text("ניסיון נוסף", color = com.hillel.studyzone.ui.theme.StudyBlue) }
             }
-        }
-
-        @JavascriptInterface
-        fun requestNotifications() {
-            if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                runOnUiThread { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
-            }
-        }
-
-        @JavascriptInterface
-        fun shareFile(fileName: String, mimeType: String, base64Data: String) {
-            Thread {
-                runCatching {
-                    val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(120).ifBlank { "studyzone-export" }
-                    val directory = File(cacheDir, "shared").apply { mkdirs() }
-                    val target = File(directory, safeName)
-                    target.writeBytes(Base64.decode(base64Data, Base64.DEFAULT))
-                    val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.files", target)
-                    val share = Intent(Intent.ACTION_SEND).apply {
-                        type = mimeType.ifBlank { "application/octet-stream" }
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    runOnUiThread { startActivity(Intent.createChooser(share, "שיתוף מ־StudyZone")) }
-                }
-            }.start()
-        }
-    }
-
-    private fun emptyResponse() = WebResourceResponse(
-        "text/plain",
-        "UTF-8",
-        ByteArrayInputStream(ByteArray(0))
-    )
-
-    private fun mimeTypeFor(path: String): String {
-        val extension = path.substringAfterLast('.', "").lowercase()
-        return when (extension) {
-            "js", "mjs" -> "text/javascript"
-            "css" -> "text/css"
-            "html" -> "text/html"
-            "svg" -> "image/svg+xml"
-            "json" -> "application/json"
-            "woff2" -> "font/woff2"
-            "wasm" -> "application/wasm"
-            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
-        }
-    }
-
-    private object URLUtilCompat {
-        fun fileName(url: String, contentDisposition: String?, mimeType: String?): String {
-            val guessed = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
-            return guessed.replace(Regex("[\\/]+"), "_")
-        }
-    }
-
-    companion object {
-        private const val LOCAL_HOST = "appassets.androidplatform.net"
-        private const val LOCAL_URL = "https://$LOCAL_HOST/app/android.html"
-        private const val BRIDGE_NAME = "StudyZoneAndroid"
-        // Constructed at runtime so forbidden frontend URLs are not shipped as usable strings.
-        private val BLOCKED_FRONTEND_HOSTS = setOf("yhnz", "i9d8").mapTo(mutableSetOf()) { suffix ->
-            listOf("studyzone", "1", suffix).joinToString("-") + ".onrender.com"
         }
     }
 }
