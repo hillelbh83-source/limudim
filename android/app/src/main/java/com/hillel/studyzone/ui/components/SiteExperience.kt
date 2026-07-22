@@ -1,5 +1,6 @@
 package com.hillel.studyzone.ui.components
 
+import com.hillel.studyzone.BuildConfig
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color as AndroidColor
