@@ -90,7 +90,7 @@ import kotlin.math.roundToInt
 
 val LocalHapticsEnabled = staticCompositionLocalOf { true }
 
-private val LocalLiquidBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+internal val LocalLiquidBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 private val LocalContentBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
 @Composable
