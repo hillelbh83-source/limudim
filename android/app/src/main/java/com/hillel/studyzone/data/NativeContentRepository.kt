@@ -53,6 +53,7 @@ internal class NativeContentRepository(
         val index = loadIndex(course.id)
         val raw = resolveLessonText(index?.optJSONObject(chapter.id), chapter.id, section.id)
         val normalized = normalizeLessonContent(raw.ifBlank { section.preview })
+        if (isMissingGeneratedContent(normalized)) return null
         if (normalized.isBlank()) return null
 
         return Lesson(
@@ -215,11 +216,14 @@ internal class NativeContentRepository(
                                 val sectionObject = sectionsArray.optJSONObject(sectionIndex) ?: continue
                                 val sectionId = sectionObject.optString("id").trim()
                                 if (sectionId.isBlank()) continue
+                                val sectionTitle = sectionObject.optString("title").ifBlank { "סעיף $sectionId" }
+                                val sectionPreview = sectionObject.optString("preview")
+                                if (isMissingGeneratedContent("$sectionTitle $sectionPreview")) continue
                                 add(
                                     Section(
                                         id = sectionId,
-                                        title = sectionObject.optString("title").ifBlank { "סעיף $sectionId" },
-                                        preview = sectionObject.optString("preview")
+                                        title = sectionTitle,
+                                        preview = sectionPreview
                                     )
                                 )
                             }
@@ -307,6 +311,9 @@ internal fun normalizeLessonContent(source: String): String {
     text = Regex("""\{\s*"((?:\\.|[^"])*)"\s*\}""").replace(text) { match ->
         normalizeTsxString(match.groupValues[1])
     }
+    text = Regex("""\{\s*`([\s\S]*?)`\s*\}""").replace(text) { match ->
+        normalizeTsxString(match.groupValues[1])
+    }
 
     // The shared Math component can be inline or block-level. At this point
     // its string expression has already been decoded, so only the wrapper and
@@ -320,6 +327,7 @@ internal fun normalizeLessonContent(source: String): String {
     // lesson blocks become Markdown sections; regular HTML keeps paragraphs,
     // lists, quotes and code readable in the native renderer.
     text = text
+        .replace(Regex("""<!--[\s\S]*?-->"""), "\n")
         .replace(Regex("""<[A-Z][A-Za-z0-9.]*\b[^>]*\btitle="([^"]+)"[^>]*>""")) { match ->
             "\n\n## ${match.groupValues[1]}\n\n"
         }
@@ -333,18 +341,26 @@ internal fun normalizeLessonContent(source: String): String {
         .replace(Regex("""<h[3-6]\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n### ")
         .replace(Regex("""</h[3-6]\s*>""", RegexOption.IGNORE_CASE), "\n\n")
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""<tr\b[^>]*>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""</tr\s*>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""<(?:td|th)\b[^>]*>""", RegexOption.IGNORE_CASE), " | ")
+        .replace(Regex("""</(?:td|th)\s*>""", RegexOption.IGNORE_CASE), " | ")
         .replace(Regex("""<li\b[^>]*>""", RegexOption.IGNORE_CASE), "\n- ")
         .replace(Regex("""</li\s*>""", RegexOption.IGNORE_CASE), "\n")
         .replace(Regex("""<blockquote\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n> ")
         .replace(Regex("""</blockquote\s*>""", RegexOption.IGNORE_CASE), "\n\n")
         .replace(Regex("""<(?:p|section|article)\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n")
         .replace(Regex("""</(?:p|section|article)\s*>""", RegexOption.IGNORE_CASE), "\n\n")
+        .replace(Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)) { match ->
+            imageMarkdownFromTag(match.value)
+        }
         .replace(Regex("""<(?:strong|b)\b[^>]*>""", RegexOption.IGNORE_CASE), "**")
         .replace(Regex("""</(?:strong|b)\s*>""", RegexOption.IGNORE_CASE), "**")
         .replace(Regex("""<code\b[^>]*>""", RegexOption.IGNORE_CASE), "`")
         .replace(Regex("""</code\s*>""", RegexOption.IGNORE_CASE), "`")
-        .replace(Regex("""</?(?:Block|ul|ol|div|header|main|footer)\b[^>]*>""", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("""\b(?:className|key|style|onClick|onChange|aria-[\w-]+)=\S+"""), " ")
+        .replace(Regex("""</?(?:Block|ul|ol|table|thead|tbody|div|header|main|footer|aside|nav)\b[^>]*>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""\b(?:className|key|style|onClick|onChange|aria-[\w-]+)=("[^"]*"|'[^']*'|\{[^}]*\}|[^\s>]+)"""), " ")
+        .replace(Regex("""</?>"""), "\n")
         .replace(Regex("""</?[A-Za-z][^>]*>"""), " ")
         .let(::stripRemainingJsxExpressions)
         .replace(Regex("""\{\s*\}"""), " ")
@@ -354,7 +370,12 @@ internal fun normalizeLessonContent(source: String): String {
         .replace("\\\\]", "\\]")
         .replace(Regex("""\s+\)\s*;?\s*$"""), "")
         .replace(Regex("""\s*[)}]\s*;\s*(?:[)}]\s*;?\s*)*$"""), "")
+        .replace(Regex("""^\s*[\(\[]\s*"""), "")
         .replace(Regex("""\\\\(?=[A-Za-z])""")) { "\\" }
+        .replace(Regex("""(?<!\n)\s+(?=#{1,3}\s+)"""), "\n\n")
+        .replace(Regex("""(?<!\n)\s+(?=\*\*(?:תשובה|תשובה נכונה|הסבר|שימו לב|פתרון|דוגמה|הערה):\*\*)"""), "\n\n")
+        .replace(Regex("""(?<!\n)\s+(?=---(?:\s|$))"""), "\n\n")
+        .replace(Regex("""(?<!\n)\s+(?=(?:[-*•]|\d+[.)])\s+[\p{L}\\$])"""), "\n")
         .replace(Regex("""(?<!\n)\s+(?=(?:הגדרה|טענה|משפט|הוכחה|דוגמה|פתרון|מסקנה|הערה|שימו לב|תרגיל)\s*:)"""), "\n\n")
         .replace(Regex("""(?<!\n)\s+(?=\d+(?:\.\d+)+\s+[\p{L}])"""), "\n\n")
         .replace(Regex("""[ \t]+"""), " ")
@@ -406,6 +427,46 @@ private fun unwrapLatex(raw: String): String {
     }
 }
 
+private fun imageMarkdownFromTag(tag: String): String {
+    val src = htmlAttribute(tag, "src")
+        ?.takeIf { it.isNotBlank() && !it.contains('{') && !it.contains('}') }
+        ?.let(::normalizeAssetImageSource)
+        ?: return "\n"
+    val alt = htmlAttribute(tag, "alt")
+        ?.replace(Regex("""[\[\]\n\r]"""), " ")
+        ?.trim()
+        .orEmpty()
+    return "\n\n![${alt.ifBlank { "תמונה מהשיעור" }}]($src)\n\n"
+}
+
+private fun htmlAttribute(tag: String, name: String): String? {
+    val pattern = Regex("""\b""" + Regex.escape(name) + """\s*=\s*(?:"([^"]*)"|'([^']*)'|\{["']([^"']*)["']\}|([^\s>]+))""")
+    val match = pattern.find(tag) ?: return null
+    return (1..4).firstNotNullOfOrNull { index -> match.groupValues[index].takeIf(String::isNotBlank) }
+}
+
+private fun normalizeAssetImageSource(raw: String): String {
+    val value = raw.trim()
+    val localPath = when {
+        value.startsWith("file:///android_asset/") -> value.removePrefix("file:///android_asset/")
+        value.startsWith("/images/") -> value.removePrefix("/")
+        value.startsWith("images/") -> value
+        value.startsWith("./images/") -> value.removePrefix("./")
+        else -> value
+    }
+    return if (localPath.startsWith("images/")) {
+        "file:///android_asset/$localPath"
+    } else {
+        value
+    }
+}
+
+private fun isMissingGeneratedContent(value: String): Boolean {
+    val normalized = value.replace(Regex("""\s+"""), " ").trim()
+    return normalized.contains("תוכן החלק לא נמצא") ||
+        normalized.matches(Regex("""שגיאה(?:\s+return)?(?:\s+\()?\s*תוכן החלק לא נמצא.*"""))
+}
+
 /** Removes unresolved JSX expressions without deleting braces inside TeX. */
 private fun stripRemainingJsxExpressions(source: String): String {
     val math = mutableListOf<String>()
@@ -444,8 +505,21 @@ private fun normalizeTsxString(raw: String): String {
         .replace("\\\"", "\"")
         .replace("\\n", "\n")
         .replace(Regex("""\\\\(?=[A-Za-z])""")) { "\\" }
+        .trim()
+    if (decoded.startsWith("$$") && decoded.endsWith("$$") && decoded.length > 4) {
+        return wrapLatex(decoded.substring(2, decoded.length - 2), display = true)
+    }
+    if (decoded.startsWith("$") && decoded.endsWith("$") && decoded.length > 2) {
+        return wrapLatex(decoded.substring(1, decoded.length - 1), display = false)
+    }
+    if (decoded.startsWith("\\[") && decoded.endsWith("\\]")) {
+        return wrapLatex(decoded.substring(2, decoded.length - 2), display = true)
+    }
+    if (decoded.startsWith("\\(") && decoded.endsWith("\\)")) {
+        return wrapLatex(decoded.substring(2, decoded.length - 2), display = false)
+    }
     val looksLikeLatex = Regex("""\\[A-Za-z]+|[_^=]|\\[\(\)\[\]]""").containsMatchIn(decoded)
-    return if (looksLikeLatex) "\\(${normalizeLatex(decoded)}\\)" else decoded
+    return if (looksLikeLatex) wrapLatex(decoded, display = false) else decoded
 }
 
 private fun normalizeLatex(raw: String): String = raw

@@ -308,7 +308,7 @@ private fun LocalRendererWebView.configureLocalRenderer(background: String) {
     settings.allowContentAccess = false
     settings.allowFileAccessFromFileURLs = false
     settings.allowUniversalAccessFromFileURLs = false
-    settings.loadsImagesAutomatically = false
+    settings.loadsImagesAutomatically = true
     settings.blockNetworkImage = true
     settings.blockNetworkLoads = true
     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
@@ -360,55 +360,101 @@ private fun lessonShell(
         body { margin:0; padding:18px 20px 64px; color:var(--fg);
                font:${bodySize}px/1.82 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
                -webkit-font-smoothing:antialiased; }
-        article { max-width:820px; margin:0 auto; overflow-wrap:anywhere; }
+        article { max-width:820px; margin:0 auto; overflow-wrap:break-word; word-break:normal; }
         h1,h2,h3 { margin:1.4em 0 .55em; line-height:1.26; letter-spacing:-.018em; }
         h1:first-child,h2:first-child,h3:first-child { margin-top:.25em; }
         h1 { font-size:1.8em; } h2 { font-size:1.42em; } h3 { font-size:1.18em; }
-        p { margin:.72em 0; }
+        p { margin:.72em 0; text-align:start; }
         strong { font-weight:750; }
         ul { margin:.7em 0; padding-inline-start:1.3em; } li { margin:.36em 0; }
+        ul.answer-options { list-style:none; display:grid; gap:9px; margin:1em 0 1.2em; padding:0; }
+        li.answer-option { position:relative; display:flex; align-items:center; gap:10px; min-height:48px;
+                           margin:0; padding:10px 12px; border-radius:16px;
+                           border:1px solid color-mix(in srgb,var(--outline) 76%,transparent);
+                           background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 82%,#ffffff 18%),
+                                                          color-mix(in srgb,var(--surface) 92%,transparent));
+                           box-shadow:0 8px 22px #00000012,inset 0 1px 0 #ffffff28; }
+        li.answer-option .option-letter { flex:none; width:30px; height:30px; display:inline-grid; place-items:center;
+                                          border-radius:50%; color:white; background:linear-gradient(155deg,#43a0ff,#0867ed);
+                                          box-shadow:0 6px 14px #1473ff44,inset 0 1px 0 #ffffff78;
+                                          font-weight:800; line-height:1; }
+        li.answer-option .option-text { min-width:0; flex:1; }
         blockquote { margin:1em 0; padding:12px 16px; border-inline-start:3px solid var(--blue);
                      background:var(--surface); border-radius:14px; color:var(--muted); }
         hr { height:1px; margin:1.5em 0; border:0; background:var(--outline); }
         code { direction:ltr; unicode-bidi:isolate; font-family:ui-monospace,SFMono-Regular,monospace;
                background:var(--surface); border-radius:7px; padding:.12em .35em; }
-        pre { direction:ltr; text-align:left; overflow:auto; padding:16px; border:1px solid var(--outline);
+        pre { direction:ltr; text-align:left; overflow:auto; max-width:100%; padding:16px; border:1px solid var(--outline);
               background:var(--surface); border-radius:18px; }
+        figure.lesson-image { margin:1.35em 0; padding:0; overflow:hidden; border-radius:20px;
+                              border:1px solid color-mix(in srgb,var(--outline) 72%,transparent);
+                              background:color-mix(in srgb,var(--surface) 70%,transparent);
+                              box-shadow:0 14px 34px #0000001f; }
+        figure.lesson-image img { display:block; width:100%; height:auto; max-height:72vh; object-fit:contain;
+                                  background:color-mix(in srgb,var(--surface) 84%,transparent); }
+        figure.lesson-image figcaption { padding:9px 12px; color:var(--muted); font-size:.86em; line-height:1.35;
+                                         border-top:1px solid color-mix(in srgb,var(--outline) 62%,transparent); }
         .math { direction:ltr; unicode-bidi:isolate; max-width:100%; color:var(--fg); }
         .math.inline { display:inline-block; vertical-align:-.12em; margin:0 .13em; }
-        .math.display { display:block; overflow-x:auto; overflow-y:hidden; margin:1.2em 0; padding:18px 14px;
+        .math.display { display:block; overflow-x:auto; overflow-y:hidden; max-width:100%; margin:1.2em 0; padding:18px 14px;
                         text-align:center; background:color-mix(in srgb,var(--surface) 72%,transparent);
-                        border-block:1px solid color-mix(in srgb,var(--outline) 72%,transparent); border-radius:16px; }
+                        border-block:1px solid color-mix(in srgb,var(--outline) 72%,transparent); border-radius:16px;
+                        -webkit-overflow-scrolling:touch; }
         .katex { font-size:1.1em; text-rendering:optimizeLegibility; }
         .katex-display { margin:0; }
+        .katex-display > .katex { max-width:100%; overflow-x:auto; overflow-y:hidden; padding-bottom:2px; }
         .katex-mathml { position:absolute; }
         .math-error { direction:ltr; color:${palette.error}; font-family:ui-monospace,monospace; }
         ::selection { background:$selectionColor; }
         #selection-popover { position:fixed; z-index:9999; display:none; direction:ltr; transform:translate(-50%,-100%);
-          width:min(350px,calc(100vw - 20px)); min-height:58px; align-items:center; gap:8px; padding:8px;
-          overflow:hidden; isolation:isolate;
-          border:1px solid color-mix(in srgb,var(--outline) 66%,#ffffff 34%); border-radius:29px;
-          background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 82%,#ffffff 18%),
-                                             color-mix(in srgb,var(--surface) 88%,transparent)); color:var(--fg);
-          box-shadow:0 20px 52px #00000042,inset 0 1px 0 #ffffff4a,inset 0 -1px 0 #00000014;
-          -webkit-backdrop-filter:blur(30px) saturate(185%); backdrop-filter:blur(30px) saturate(185%);
-          animation:selectionPopoverIn .2s cubic-bezier(.18,.88,.2,1.12) both; }
-        #selection-popover::before { content:""; position:absolute; z-index:-1; inset:-40% -10%; pointer-events:none;
-          background:radial-gradient(circle at 18% 12%,#ffffff36,transparent 36%),
-                     radial-gradient(circle at 85% 100%,#1473ff1c,transparent 42%); }
+          width:min(358px,calc(100vw - 18px)); min-height:60px; align-items:center; gap:8px; padding:8px;
+          overflow:hidden; isolation:isolate; contain:layout paint;
+          border:1px solid color-mix(in srgb,#ffffff 58%,var(--outline) 42%); border-radius:31px;
+          background:
+            linear-gradient(135deg,color-mix(in srgb,#ffffff 38%,transparent),transparent 34%),
+            linear-gradient(160deg,color-mix(in srgb,var(--surface) 72%,#ffffff 28%),
+                                   color-mix(in srgb,var(--surface) 54%,transparent));
+          color:var(--fg);
+          box-shadow:
+            0 24px 62px #00000040,
+            0 8px 22px #1473ff1a,
+            inset 0 1px 0 #ffffffa6,
+            inset 0 -1px 0 #00000018,
+            inset 0 0 0 1px #ffffff24;
+          -webkit-backdrop-filter:blur(38px) saturate(210%) contrast(108%);
+          backdrop-filter:blur(38px) saturate(210%) contrast(108%);
+          animation:selectionPopoverIn .24s cubic-bezier(.16,.9,.18,1.1) both; }
+        #selection-popover::before { content:""; position:absolute; z-index:-2; inset:-65% -22%; pointer-events:none;
+          background:
+            radial-gradient(circle at 18% 8%,#ffffffb5 0 9%,#ffffff45 18%,transparent 37%),
+            radial-gradient(circle at 78% 110%,#1473ff4d 0 18%,transparent 46%),
+            linear-gradient(100deg,transparent 0 28%,#ffffff38 44%,transparent 62% 100%);
+          transform:translateX(-18%); animation:selectionGlassSweep 4.8s ease-in-out infinite; }
+        #selection-popover::after { content:""; position:absolute; z-index:-1; inset:1px; pointer-events:none;
+          border-radius:30px;
+          background:
+            linear-gradient(180deg,#ffffff52,transparent 42%),
+            radial-gradient(120% 140% at 50% -40%,#ffffff66,transparent 54%);
+          box-shadow:inset 0 0 18px #ffffff28; }
         #selection-question { direction:rtl; text-align:right; min-width:0; flex:1; height:42px; padding:0 11px;
           border:0; outline:0; background:transparent; color:var(--fg); caret-color:var(--blue);
           font:520 15.5px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
         #selection-question::placeholder { color:var(--muted); opacity:.9; }
         #selection-send { appearance:none; flex:none; width:42px; height:42px; display:grid; place-items:center;
-          border:1px solid #ffffff42; border-radius:50%; background:linear-gradient(155deg,#2788ff,#0867ed);
-          color:white; box-shadow:0 7px 19px #1473ff66,inset 0 1px 0 #ffffff52;
-          transition:transform .14s ease,filter .14s ease; }
-        #selection-send:active { transform:scale(.9); filter:brightness(.92); }
+          border:1px solid #ffffff7a; border-radius:50%;
+          background:
+            radial-gradient(circle at 32% 20%,#ffffff82 0 13%,transparent 28%),
+            linear-gradient(155deg,#43a0ff,#0867ed 68%,#0055d6);
+          color:white; box-shadow:0 9px 22px #1473ff70,inset 0 1px 0 #ffffff86,inset 0 -1px 0 #003f9a6e;
+          transition:transform .16s cubic-bezier(.2,.8,.2,1),filter .16s ease,box-shadow .16s ease; }
+        #selection-send:active { transform:scale(.88); filter:brightness(.94) saturate(1.08);
+          box-shadow:0 5px 13px #1473ff55,inset 0 1px 0 #ffffff72,inset 0 2px 8px #003f9a66; }
         #selection-send svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.25;
                               stroke-linecap:round; stroke-linejoin:round; }
         @keyframes selectionPopoverIn { from { opacity:0; transform:translate(-50%,-90%) scale(.9); }
                                         to { opacity:1; transform:translate(-50%,-100%) scale(1); } }
+        @keyframes selectionGlassSweep { 0%,100% { transform:translateX(-18%) rotate(-3deg); opacity:.9; }
+                                         50% { transform:translateX(14%) rotate(3deg); opacity:1; } }
       </style>
       <script>$katexSource</script>
       <script>${sharedRendererScript()}
@@ -1018,7 +1064,7 @@ private fun sharedRendererScript() = """
         return '<code class="math-error" dir="ltr">' + escapeHtml(tex) + '</code>';
       }
     }
-    function renderMarkdown(source) {
+      function renderMarkdown(source) {
       let raw = String(source || '').replace(/\r\n?/g,'\n');
       const math = [];
       function token(tex, display) {
@@ -1033,8 +1079,16 @@ private fun sharedRendererScript() = """
       const lines = raw.split('\n');
       let html = '';
       let listOpen = false;
-      function closeList() { if (listOpen) { html += '</ul>'; listOpen = false; } }
+      let listKind = '';
+      function closeList() { if (listOpen) { html += '</ul>'; listOpen = false; listKind = ''; } }
       function inline(value) {
+        const media = [];
+        value = String(value || '').replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function(_,alt,src) {
+          const rendered = renderImage(src, alt);
+          if (!rendered) return '';
+          const index = media.push(rendered) - 1;
+          return '@@STUDY_MEDIA_' + index + '@@';
+        });
         let result = escapeHtml(value)
           .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
           .replace(/`([^`]+)`/g,'<code>$1</code>');
@@ -1042,7 +1096,17 @@ private fun sharedRendererScript() = """
           const item = math[Number(index)];
           return item ? renderTex(item.tex,item.display) : '';
         });
+        result = result.replace(/@@STUDY_MEDIA_(\d+)@@/g, function(_,index) {
+          return media[Number(index)] || '';
+        });
         return result;
+      }
+      function renderImage(src, alt) {
+        const cleanSrc = String(src || '').trim();
+        if (!/^file:\/\/\/android_asset\/images\/[-._~:/%()\u0590-\u05FF\w]+$/u.test(cleanSrc)) return '';
+        const cleanAlt = String(alt || '').trim();
+        const caption = cleanAlt ? '<figcaption>' + escapeHtml(cleanAlt) + '</figcaption>' : '';
+        return '<figure class="lesson-image"><img src="' + escapeHtml(cleanSrc) + '" alt="' + escapeHtml(cleanAlt) + '" loading="lazy" />' + caption + '</figure>';
       }
       lines.forEach(function(line) {
         const trimmed = line.trim();
@@ -1055,8 +1119,21 @@ private fun sharedRendererScript() = """
         if ((match = trimmed.match(/^#\s+(.+)$/))) { closeList(); html += '<h1>' + inline(match[1]) + '</h1>'; return; }
         if ((match = trimmed.match(/^>\s*(.+)$/))) { closeList(); html += '<blockquote>' + inline(match[1]) + '</blockquote>'; return; }
         if ((match = trimmed.match(/^(?:[-*•]|\d+[.)])\s+(.+)$/))) {
-          if (!listOpen) { html += '<ul>'; listOpen = true; }
-          html += '<li>' + inline(match[1]) + '</li>'; return;
+          const option = match[1].match(/^([א-ת])\.\s+(.+)$/);
+          const desiredKind = option ? 'options' : 'regular';
+          if (listOpen && listKind !== desiredKind) closeList();
+          if (!listOpen) {
+            html += desiredKind === 'options' ? '<ul class="answer-options">' : '<ul>';
+            listOpen = true;
+            listKind = desiredKind;
+          }
+          if (option) {
+            html += '<li class="answer-option"><span class="option-letter">' + escapeHtml(option[1]) +
+              '</span><span class="option-text">' + inline(option[2]) + '</span></li>';
+          } else {
+            html += '<li>' + inline(match[1]) + '</li>';
+          }
+          return;
         }
         closeList(); html += '<p>' + inline(trimmed) + '</p>';
       });

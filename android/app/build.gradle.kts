@@ -10,7 +10,7 @@ val studyZoneApiUrl = providers.gradleProperty("STUDYZONE_API_URL")
     .getOrElse("https://studyzone-cpav.onrender.com")
 val googleWebClientId = providers.gradleProperty("GOOGLE_WEB_CLIENT_ID")
     .orElse(providers.environmentVariable("GOOGLE_WEB_CLIENT_ID"))
-    .getOrElse("126122580284-a7rlabpvmfumcsopjt2v97eci8det4jp.apps.googleusercontent.com")
+    .getOrElse("58058669967-3cjhrbh6ngkgic651gvrj9rctimh0fhj.apps.googleusercontent.com")
 
 android {
     namespace = "com.hillel.studyzone"
