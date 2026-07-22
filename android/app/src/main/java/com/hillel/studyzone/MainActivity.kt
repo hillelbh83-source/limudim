@@ -466,7 +466,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
 
         IntroSplash(introVisible)
         if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background, themeRevealOrigin)
-    }
+    })
 }
 
 @Composable

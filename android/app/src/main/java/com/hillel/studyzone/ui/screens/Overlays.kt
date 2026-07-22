@@ -804,10 +804,10 @@ fun ChatOverlay(
                 onClearReply = onClearReply,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
             )
-          }
         }
       }
     }
+  }
 }
 
 @Composable

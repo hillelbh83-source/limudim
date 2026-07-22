@@ -143,7 +143,7 @@ private fun Modifier.liquidBackdrop(
     selected: Boolean,
     surfaceColor: Color,
     borderColor: Color,
-    exportedBackdrop: Backdrop? = null,
+    exportedBackdrop: com.kyant.backdrop.backdrops.LayerBackdrop? = null,
     layerBlock: (androidx.compose.ui.graphics.GraphicsLayerScope.() -> Unit)? = null,
     highlightAlpha: Float = if (selected) .78f else .5f,
     blurRadius: Dp = if (selected) 14.dp else 10.dp,
@@ -197,7 +197,7 @@ fun GlassSurface(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(28.dp),
     selected: Boolean = false,
-    exportedBackdrop: Backdrop? = null,
+    exportedBackdrop: com.kyant.backdrop.backdrops.LayerBackdrop? = null,
     layerBlock: (androidx.compose.ui.graphics.GraphicsLayerScope.() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
