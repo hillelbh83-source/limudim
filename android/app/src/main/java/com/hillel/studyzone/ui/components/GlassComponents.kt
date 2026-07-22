@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -180,11 +182,23 @@ fun RoundActionButton(
             .sizeIn(minWidth = touchSize, minHeight = touchSize)
             .alpha(if (enabled) 1f else .4f)
             .scale(scale)
+            .shadow(
+                elevation = if (active) 12.dp else 8.dp,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = .16f),
+                spotColor = if (active) StudyBlue.copy(alpha = .32f) else Color.Black.copy(alpha = .22f)
+            )
             .clip(CircleShape)
-            .background(fill)
+            .background(fill.copy(alpha = if (active) .96f else .84f))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = if (active) .20f else .26f), Color.Transparent)
+                )
+            )
             .border(
                 1.dp,
-                if (active) Color.White.copy(alpha = .2f) else MaterialTheme.colorScheme.outline.copy(alpha = .62f),
+                if (active) Color.White.copy(alpha = .34f) else MaterialTheme.colorScheme.outline.copy(alpha = .58f),
                 CircleShape
             )
             .clickable(

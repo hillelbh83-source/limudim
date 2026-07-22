@@ -106,7 +106,7 @@ fun ChatRichText(
     if (messages.isEmpty()) return
     val context = LocalContext.current
     val palette = currentWebPalette()
-    val bodySize = MaterialTheme.typography.bodyMedium.fontSize.value.coerceIn(13f, 20f)
+    val bodySize = MaterialTheme.typography.bodyLarge.fontSize.value.coerceIn(15f, 21f)
     val shell = remember(palette, bodySize) {
         chatShell(
             palette = palette,
@@ -385,18 +385,30 @@ private fun lessonShell(
         .math-error { direction:ltr; color:${palette.error}; font-family:ui-monospace,monospace; }
         ::selection { background:$selectionColor; }
         #selection-popover { position:fixed; z-index:9999; display:none; direction:ltr; transform:translate(-50%,-100%);
-          width:min(344px,calc(100vw - 24px)); min-height:54px; align-items:center; gap:7px; padding:7px;
-          border:1px solid color-mix(in srgb,var(--outline) 72%,transparent); border-radius:27px;
-          background:color-mix(in srgb,var(--surface) 84%,transparent); color:var(--fg);
-          box-shadow:0 18px 48px #00000038,inset 0 1px 0 #ffffff28;
-          -webkit-backdrop-filter:blur(24px) saturate(160%); backdrop-filter:blur(24px) saturate(160%); }
-        #selection-question { direction:rtl; text-align:right; min-width:0; flex:1; height:40px; padding:0 10px;
+          width:min(350px,calc(100vw - 20px)); min-height:58px; align-items:center; gap:8px; padding:8px;
+          overflow:hidden; isolation:isolate;
+          border:1px solid color-mix(in srgb,var(--outline) 66%,#ffffff 34%); border-radius:29px;
+          background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 82%,#ffffff 18%),
+                                             color-mix(in srgb,var(--surface) 88%,transparent)); color:var(--fg);
+          box-shadow:0 20px 52px #00000042,inset 0 1px 0 #ffffff4a,inset 0 -1px 0 #00000014;
+          -webkit-backdrop-filter:blur(30px) saturate(185%); backdrop-filter:blur(30px) saturate(185%);
+          animation:selectionPopoverIn .2s cubic-bezier(.18,.88,.2,1.12) both; }
+        #selection-popover::before { content:""; position:absolute; z-index:-1; inset:-40% -10%; pointer-events:none;
+          background:radial-gradient(circle at 18% 12%,#ffffff36,transparent 36%),
+                     radial-gradient(circle at 85% 100%,#1473ff1c,transparent 42%); }
+        #selection-question { direction:rtl; text-align:right; min-width:0; flex:1; height:42px; padding:0 11px;
           border:0; outline:0; background:transparent; color:var(--fg); caret-color:var(--blue);
-          font:500 15px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+          font:520 15.5px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
         #selection-question::placeholder { color:var(--muted); opacity:.9; }
-        #selection-send { appearance:none; flex:none; width:40px; height:40px; display:grid; place-items:center;
-          border:0; border-radius:50%; background:var(--blue); color:white; font:800 22px/1 Arial,sans-serif;
-          box-shadow:0 6px 16px #1473ff55; }
+        #selection-send { appearance:none; flex:none; width:42px; height:42px; display:grid; place-items:center;
+          border:1px solid #ffffff42; border-radius:50%; background:linear-gradient(155deg,#2788ff,#0867ed);
+          color:white; box-shadow:0 7px 19px #1473ff66,inset 0 1px 0 #ffffff52;
+          transition:transform .14s ease,filter .14s ease; }
+        #selection-send:active { transform:scale(.9); filter:brightness(.92); }
+        #selection-send svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.25;
+                              stroke-linecap:round; stroke-linejoin:round; }
+        @keyframes selectionPopoverIn { from { opacity:0; transform:translate(-50%,-90%) scale(.9); }
+                                        to { opacity:1; transform:translate(-50%,-100%) scale(1); } }
       </style>
       <script>$katexSource</script>
       <script>${sharedRendererScript()}
@@ -405,7 +417,9 @@ private fun lessonShell(
         };
         document.addEventListener('DOMContentLoaded', function() {
           const popover = document.getElementById('selection-popover');
+          const questionInput = document.getElementById('selection-question');
           let selectedText = '';
+          let selectionTimer = 0;
           function rememberSelection() {
             const selection = window.getSelection();
             const text = selection ? selection.toString().trim() : '';
@@ -413,8 +427,10 @@ private fun lessonShell(
           }
           function updateSelectionPopover(event) {
             if (event && popover.contains(event.target)) return;
+            if (document.activeElement === questionInput) return;
             if (!${selectionEnabled}) { popover.style.display = 'none'; return; }
-            window.setTimeout(function() {
+            window.clearTimeout(selectionTimer);
+            selectionTimer = window.setTimeout(function() {
               const selection = window.getSelection();
               const text = selection ? selection.toString().trim() : '';
               if (!text || !selection.rangeCount) { popover.style.display = 'none'; return; }
@@ -424,32 +440,37 @@ private fun lessonShell(
               popover.style.left = Math.max(half + 12, Math.min(window.innerWidth - half - 12, rect.left + rect.width / 2)) + 'px';
               popover.style.top = Math.max(68, rect.top - 10) + 'px';
               popover.style.display = 'flex';
-            }, 70);
+            }, 24);
           }
           function sendSelectionQuestion() {
-            const input = document.getElementById('selection-question');
-            const question = input.value.trim();
+            const question = questionInput.value.trim();
             if (!selectedText || !question) return;
             if (window.AndroidSelection) window.AndroidSelection.ask(selectedText, question);
-            input.value = '';
+            questionInput.value = '';
             popover.style.display = 'none';
             if (${clearSelectionAfterAction}) window.getSelection().removeAllRanges();
           }
-          document.addEventListener('selectionchange', rememberSelection, true);
+          document.addEventListener('selectionchange', function(event) {
+            rememberSelection();
+            updateSelectionPopover(event);
+          }, true);
           document.addEventListener('touchstart', function(event) {
             if (!popover.contains(event.target)) popover.style.display = 'none';
           }, true);
           window.addEventListener('touchend', updateSelectionPopover, true);
+          window.addEventListener('pointerup', updateSelectionPopover, true);
           window.addEventListener('mouseup', updateSelectionPopover, true);
           document.getElementById('selection-send').addEventListener('click', sendSelectionQuestion);
-          document.getElementById('selection-question').addEventListener('keydown', function(event) {
+          questionInput.addEventListener('keydown', function(event) {
             if (event.key === 'Enter') { event.preventDefault(); sendSelectionQuestion(); }
           });
         });
       </script>
     </head>
     <body><div id="selection-popover" role="dialog" aria-label="שאלו את פיתי על הטקסט המסומן">
-      <button id="selection-send" type="button" aria-label="שליחה">↑</button>
+      <button id="selection-send" type="button" aria-label="שליחה"><svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 19V5"></path><path d="M6.5 10.5 12 5l5.5 5.5"></path>
+      </svg></button>
       <input id="selection-question" type="text" inputmode="text" enterkeyhint="send" placeholder="שאלו את פיתי על הקטע…" />
     </div><article id="lesson" aria-live="polite"></article></body>
     </html>
@@ -527,17 +548,18 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
                 --surface:${palette.surface}; --outline:${palette.outline}; --error:${palette.error}; }
         * { box-sizing:border-box; }
         html,body { min-height:100%; background:${palette.background}; }
-        body { margin:0; padding:10px 4px 22px; color:var(--fg);
+        body { margin:0; padding:14px 12px 28px; color:var(--fg);
                font:${bodySize}px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
                -webkit-font-smoothing:antialiased; }
-        #messages { display:flex; flex-direction:column; gap:10px; }
-        .message { width:fit-content; max-width:86%; padding:11px 18px; border-radius:24px;
+        #messages { display:flex; flex-direction:column; gap:18px; }
+        .message { width:fit-content; max-width:78%; padding:12px 18px; border-radius:26px;
                    overflow-wrap:anywhere; border:1px solid transparent; }
         .message.user { align-self:flex-end; color:var(--fg);
-                        background:color-mix(in srgb,var(--surface) 82%,var(--fg) 18%);
-                        box-shadow:0 6px 18px #00000018;
+                        background:color-mix(in srgb,var(--surface) 78%,var(--fg) 22%);
+                        border-color:color-mix(in srgb,var(--outline) 72%,transparent);
+                        box-shadow:0 8px 26px #00000024,inset 0 1px 0 #ffffff14;
                         -webkit-user-select:none; user-select:none; }
-        .message.model { align-self:flex-start; width:100%; max-width:100%; padding:9px 4px; background:transparent; border:0;
+        .message.model { align-self:flex-start; width:100%; max-width:100%; padding:3px 1px; background:transparent; border:0;
                          direction:rtl; text-align:right; }
         .message.error { color:var(--error); border-color:color-mix(in srgb,var(--error) 35%,transparent); }
         .message p { margin:.45em 0; } .message p:first-child { margin-top:0; } .message p:last-child { margin-bottom:0; }
@@ -565,23 +587,29 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
                        background:color-mix(in srgb,var(--surface) 72%,transparent); color:inherit; opacity:.92;
                        font-size:.82em; line-height:1.4;
                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .message-actions { width:100%; display:flex; direction:ltr; justify-content:flex-start; gap:3px; margin-top:7px; }
-        .message-action { appearance:none; width:34px; height:34px; display:grid; place-items:center; padding:0;
+        .message-actions { width:100%; display:flex; direction:ltr; justify-content:flex-start; gap:2px; margin-top:10px; }
+        .message-action { appearance:none; width:36px; height:36px; display:grid; place-items:center; padding:0;
                           border:0; border-radius:11px; background:transparent; color:var(--muted);
-                          font:600 21px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+                          transition:background .14s ease,color .14s ease,transform .14s ease; }
+        .message-action svg { width:22px; height:22px; display:block; fill:none; stroke:currentColor;
+                              stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
         .message-action:active { background:color-mix(in srgb,var(--surface) 82%,transparent); color:var(--fg); }
+        .message-action:active { transform:scale(.9); }
         #message-menu-backdrop { position:fixed; inset:0; z-index:9997; background:transparent; }
-        #message-menu { position:fixed; z-index:9998; width:236px; overflow:hidden; direction:rtl;
-                        border:1px solid color-mix(in srgb,var(--outline) 74%,transparent); border-radius:25px;
-                        background:color-mix(in srgb,var(--surface) 91%,transparent); color:var(--fg);
-                        box-shadow:0 22px 60px #00000052,inset 0 1px 0 #ffffff22;
-                        -webkit-backdrop-filter:blur(28px) saturate(160%); backdrop-filter:blur(28px) saturate(160%); }
-        .menu-time { padding:16px 18px 9px; color:var(--muted); font-size:.78em; direction:rtl; }
-        .menu-item { appearance:none; width:100%; min-height:54px; display:flex; align-items:center; gap:14px;
-                     padding:9px 18px; border:0; background:transparent; color:var(--fg); text-align:right;
-                     font:650 16px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+        #message-menu { position:fixed; z-index:9998; width:246px; overflow:hidden; direction:ltr;
+                        border:1px solid color-mix(in srgb,var(--outline) 82%,transparent); border-radius:27px;
+                        background:color-mix(in srgb,var(--surface) 94%,transparent); color:var(--fg);
+                        box-shadow:0 24px 70px #00000060,inset 0 1px 0 #ffffff20;
+                        -webkit-backdrop-filter:blur(30px) saturate(170%); backdrop-filter:blur(30px) saturate(170%);
+                        animation:menuIn .18s cubic-bezier(.2,.82,.2,1) both; }
+        .menu-time { padding:20px 20px 10px; color:var(--muted); font-size:.86em; direction:ltr; text-align:left; }
+        .menu-item { appearance:none; width:100%; min-height:62px; display:flex; align-items:center; gap:17px;
+                     padding:10px 20px; border:0; background:transparent; color:var(--fg); text-align:left;
+                     font:600 17px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
         .menu-item:active { background:color-mix(in srgb,var(--fg) 9%,transparent); }
-        .menu-icon { width:27px; flex:none; text-align:center; font-size:22px; font-weight:400; }
+        .menu-icon { width:28px; height:28px; flex:none; display:grid; place-items:center; }
+        .menu-icon svg { width:27px; height:27px; fill:none; stroke:currentColor; stroke-width:1.8;
+                         stroke-linecap:round; stroke-linejoin:round; }
         .tool-card { width:100%; margin:12px 0 4px; overflow:hidden; border:1px solid var(--outline);
                      border-radius:20px; background:var(--surface); color:var(--fg);
                      box-shadow:0 10px 28px -24px #0f172a99; }
@@ -627,6 +655,14 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         ${if (palette.dark) ".flash-card:not(.back) { background:linear-gradient(145deg,#172033,#25235a); color:var(--fg); }" else ""}
         @keyframes pulse { 50% { opacity:.28; transform:translateY(-2px); } }
         @keyframes blink { 50% { opacity:0; } }
+        @keyframes messageIn { from { opacity:0; transform:translateY(18px) scale(.94); }
+                               to { opacity:1; transform:translateY(0) scale(1); } }
+        @keyframes modelIn { from { opacity:0; transform:translateY(9px); } to { opacity:1; transform:none; } }
+        @keyframes menuIn { from { opacity:0; transform:scale(.88) translateY(8px); }
+                            to { opacity:1; transform:scale(1) translateY(0); } }
+        .message.enter.user { transform-origin:bottom right; animation:messageIn .32s cubic-bezier(.18,.88,.22,1.16) both; }
+        .message.enter.model { animation:modelIn .25s ease-out .07s both; }
+        @media (prefers-reduced-motion:reduce) { .message.enter,#message-menu { animation:none; } }
       </style>
       <script>$katexSource</script>
       <script>${sharedRendererScript()}
@@ -815,9 +851,19 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           else if (method === 'retry') window.AndroidChat.retry(String(args[0] || ''));
         }
 
-        function actionButton(symbol, label, action) {
+        function iconSvg(name) {
+          const open = '<svg viewBox="0 0 24 24" aria-hidden="true">';
+          if (name === 'copy') return open + '<rect x="8" y="8" width="12" height="12" rx="3"></rect><rect x="4" y="4" width="12" height="12" rx="3"></rect></svg>';
+          if (name === 'select') return open + '<rect x="5" y="3" width="14" height="18" rx="3"></rect><path d="M9 8h6M9 12h6M9 16h4"></path></svg>';
+          if (name === 'edit') return open + '<path d="M4 20l4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16 4 20z"></path><path d="M13.8 6.4l3.8 3.8"></path></svg>';
+          if (name === 'retry') return open + '<path d="M20 7v5h-5"></path><path d="M19 12a7 7 0 1 0-1.9 4.8"></path></svg>';
+          if (name === 'share') return open + '<circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="M8.2 10.8l7.6-4.5M8.2 13.2l7.6 4.5"></path></svg>';
+          return open + '</svg>';
+        }
+
+        function actionButton(icon, label, action) {
           const button = document.createElement('button');
-          button.type = 'button'; button.className = 'message-action'; button.textContent = symbol;
+          button.type = 'button'; button.className = 'message-action'; button.innerHTML = iconSvg(icon);
           button.setAttribute('aria-label', label); button.title = label;
           button.addEventListener('click', function(event) { event.stopPropagation(); action(); });
           return button;
@@ -837,29 +883,31 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           backdrop.addEventListener('click', closeMessageMenu);
           const menu = document.createElement('section');
           menu.id = 'message-menu'; menu.setAttribute('role', 'menu');
-          const when = new Date(Number(message.createdAt) || Date.now()).toLocaleString('he-IL', {
-            day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'
-          });
+          const messageDate = new Date(Number(message.createdAt) || Date.now());
+          const now = new Date();
+          const sameDay = messageDate.toDateString() === now.toDateString();
+          const dayLabel = sameDay ? 'Today' : messageDate.toLocaleDateString('en-US', {month:'short',day:'numeric'});
+          const when = dayLabel + ', ' + messageDate.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
           const time = document.createElement('div'); time.className = 'menu-time'; time.textContent = when;
           menu.appendChild(time);
           function item(icon, label, action) {
             const button = document.createElement('button');
             button.type = 'button'; button.className = 'menu-item';
-            button.innerHTML = '<span class="menu-icon">' + icon + '</span><span>' + label + '</span>';
+            button.innerHTML = '<span class="menu-icon">' + iconSvg(icon) + '</span><span>' + label + '</span>';
             button.addEventListener('click', function(event) { event.stopPropagation(); closeMessageMenu(); action(); });
             menu.appendChild(button);
           }
-          item('⧉', 'העתקה', function() { chatBridge('copy', message.text || ''); });
-          item('▤', 'בחירת טקסט', function() {
+          item('copy', 'Copy', function() { chatBridge('copy', message.text || ''); });
+          item('select', 'Select text', function() {
             const content = bubble.querySelector('.message-content');
             if (!content) return;
             bubble.style.webkitUserSelect = 'text'; bubble.style.userSelect = 'text';
             const range = document.createRange(); range.selectNodeContents(content);
             const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
           });
-          item('✎', 'עריכת ההודעה', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
+          item('edit', 'Edit message', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
           document.body.appendChild(backdrop); document.body.appendChild(menu);
-          const width = 236, height = 222;
+          const width = 246, height = 236;
           menu.style.left = Math.max(10, Math.min(window.innerWidth - width - 10, clientX - width / 2)) + 'px';
           menu.style.top = Math.max(10, Math.min(window.innerHeight - height - 10, clientY - height / 2)) + 'px';
         }
@@ -883,6 +931,8 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           });
         }
 
+        const renderedMessageIds = new Set();
+        let renderedOnce = false;
         let pendingMessages = null;
         let messageFrame = 0;
         window.renderMessages = function(messages) {
@@ -892,10 +942,25 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           messageFrame = 0;
           const messages = pendingMessages;
           const root = document.getElementById('messages');
+          const preservedUserBubbles = Object.create(null);
+          root.querySelectorAll('.message.user[data-message-id]').forEach(function(node) {
+            preservedUserBubbles[node.getAttribute('data-message-id')] = node;
+            node.remove();
+          });
           root.innerHTML = '';
           (messages || []).forEach(function(message) {
+            const messageId = String(message.id || '');
+            const preservedUser = preservedUserBubbles[messageId];
+            if (preservedUser) {
+              root.appendChild(preservedUser);
+              renderedMessageIds.add(messageId);
+              return;
+            }
+            const entering = !renderedMessageIds.has(messageId) && (renderedOnce || messages.length <= 2);
             const bubble = document.createElement('section');
-            bubble.className = 'message ' + (message.role === 'user' ? 'user' : 'model') + (message.error ? ' error' : '');
+            bubble.className = 'message ' + (message.role === 'user' ? 'user' : 'model') +
+              (message.error ? ' error' : '') + (entering ? ' enter' : '');
+            bubble.setAttribute('data-message-id', messageId);
             bubble.setAttribute('dir', 'auto');
             if (message.replyTo) {
               const reply = document.createElement('div'); reply.className = 'reply-quote'; reply.textContent = message.replyTo;
@@ -920,14 +985,16 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             if (message.plot) renderPlot(bubble, message.plot);
             if (!message.streaming && message.role === 'model') {
               const actions = document.createElement('div'); actions.className = 'message-actions';
-              actions.appendChild(actionButton('⧉', 'העתקת התשובה', function() { chatBridge('copy', message.text || ''); }));
-              actions.appendChild(actionButton('↻', 'ניסיון נוסף', function() { chatBridge('retry', String(message.id || '')); }));
-              actions.appendChild(actionButton('↗', 'שיתוף התשובה', function() { chatBridge('share', message.text || ''); }));
+              actions.appendChild(actionButton('copy', 'העתקת התשובה', function() { chatBridge('copy', message.text || ''); }));
+              actions.appendChild(actionButton('retry', 'ניסיון נוסף', function() { chatBridge('retry', String(message.id || '')); }));
+              actions.appendChild(actionButton('share', 'שיתוף התשובה', function() { chatBridge('share', message.text || ''); }));
               bubble.appendChild(actions);
             }
             if (message.role === 'user') installUserLongPress(bubble, message);
             root.appendChild(bubble);
+            renderedMessageIds.add(messageId);
           });
+          renderedOnce = true;
           requestAnimationFrame(function() { window.scrollTo(0, document.body.scrollHeight); });
           });
         };

@@ -64,6 +64,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Add
@@ -77,8 +78,6 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.KeyboardArrowLeft
-import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Mic
@@ -115,6 +114,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
@@ -463,7 +463,7 @@ fun LessonScreen(
                 ) {
                     Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
                         RoundActionButton(
-                            Icons.Rounded.KeyboardArrowRight,
+                            Icons.AutoMirrored.Rounded.ArrowBack,
                             "השיעור הקודם",
                             onPrevious,
                             size = 44.dp,
@@ -483,7 +483,7 @@ fun LessonScreen(
                         }
                         Spacer(Modifier.weight(1f))
                         RoundActionButton(
-                            Icons.Rounded.KeyboardArrowLeft,
+                            Icons.AutoMirrored.Rounded.ArrowForward,
                             "השיעור הבא",
                             onNext,
                             size = 44.dp,
@@ -619,9 +619,6 @@ fun ChatOverlay(
             Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(sheetFraction.value)
-                .padding(
-                    bottom = if (!state.chatExpanded && !keyboardVisible && state.lesson == null && state.selectedCourse == null) 92.dp else 0.dp
-                )
                 .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .background(MaterialTheme.colorScheme.background)
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .65f), RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
@@ -677,9 +674,14 @@ fun ChatOverlay(
                     )
                 }
                 if (state.chatMessages.isNotEmpty()) {
-                    IconButton(onClick = onClear) { Icon(Icons.Rounded.DeleteOutline, "ניקוי השיחה") }
+                    ComposerIcon(Icons.Rounded.DeleteOutline, "ניקוי השיחה", onClear, MaterialTheme.colorScheme.onSurface)
                 }
-                IconButton(onClick = { dismissKeyboard(); onOpen(false) }) { Icon(Icons.Rounded.Close, "סגירה") }
+                ComposerIcon(
+                    Icons.Rounded.Close,
+                    "סגירה",
+                    { dismissKeyboard(); onOpen(false) },
+                    MaterialTheme.colorScheme.onSurface
+                )
             }
 
             state.chatTimerRemainingSeconds?.let { remaining ->
@@ -807,7 +809,7 @@ private fun PythiComposer(
     modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(30.dp)
-    val composerColor = MaterialTheme.colorScheme.surfaceVariant
+    val composerColor = MaterialTheme.colorScheme.surface.copy(alpha = .90f)
     val contentColor = MaterialTheme.colorScheme.onSurface
     val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
     val latestInput by rememberUpdatedState(input)
@@ -818,9 +820,17 @@ private fun PythiComposer(
     androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Column(
             modifier
+                .shadow(
+                    elevation = 12.dp,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = .16f),
+                    spotColor = Color.Black.copy(alpha = .24f)
+                )
                 .clip(shape)
                 .background(composerColor)
-                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .7f), shape)
+                .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .08f), Color.Transparent)))
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .58f), shape)
                 .padding(horizontal = 8.dp, vertical = 7.dp)
         ) {
             replyContext?.takeIf(String::isNotBlank)?.let { quoted ->
@@ -920,10 +930,28 @@ private fun ComposerIcon(
     background: Color = Color.Transparent
 ) {
     IconButton(onClick = onClick, modifier = Modifier.size(42.dp)) {
+        val iconShape = CircleShape
         Box(
             Modifier.size(if (background == Color.Transparent) 38.dp else 35.dp)
-                .clip(CircleShape)
-                .background(background),
+                .shadow(
+                    elevation = if (background == Color.Transparent) 0.dp else 7.dp,
+                    shape = iconShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = .12f),
+                    spotColor = background.copy(alpha = .34f)
+                )
+                .clip(iconShape)
+                .background(
+                    if (background == Color.Transparent) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .34f)
+                    else background
+                )
+                .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .16f), Color.Transparent)))
+                .border(
+                    1.dp,
+                    if (background == Color.Transparent) MaterialTheme.colorScheme.outline.copy(alpha = .32f)
+                    else Color.White.copy(alpha = .28f),
+                    iconShape
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, description, tint = tint, modifier = Modifier.size(if (background == Color.Transparent) 21.dp else 19.dp))
@@ -1234,11 +1262,11 @@ fun PdfOverlay(uri: Uri, onClose: () -> Unit) {
         }
         GlassSurface(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(10.dp)) {
             Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundActionButton(Icons.Rounded.KeyboardArrowRight, "עמוד קודם", { if (page > 0) page-- }, size = 44.dp)
+                RoundActionButton(Icons.AutoMirrored.Rounded.ArrowBack, "עמוד קודם", { if (page > 0) page-- }, size = 44.dp)
                 Spacer(Modifier.width(24.dp))
                 Text("עמוד ${page + 1}", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(24.dp))
-                RoundActionButton(Icons.Rounded.KeyboardArrowLeft, "עמוד הבא", { if (page + 1 < pageCount) page++ }, size = 44.dp, active = page + 1 < pageCount)
+                RoundActionButton(Icons.AutoMirrored.Rounded.ArrowForward, "עמוד הבא", { if (page + 1 < pageCount) page++ }, size = 44.dp, active = page + 1 < pageCount)
             }
         }
     }
