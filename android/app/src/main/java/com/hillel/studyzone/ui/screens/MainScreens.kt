@@ -53,12 +53,14 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -66,6 +68,8 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -99,6 +103,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -788,19 +793,14 @@ fun ProfileScreen(
     state: UiState,
     onAuth: () -> Unit,
     onLogout: () -> Unit,
-    onAdmin: () -> Unit,
-    onTheme: (ThemeMode) -> Unit,
-    onReduceMotion: (Boolean) -> Unit,
-    onHaptics: (Boolean) -> Unit,
-    onFontScale: (Float) -> Unit,
-    onKeepScreenOn: (Boolean) -> Unit
+    onAdmin: () -> Unit
 ) {
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 130.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { Text("פרופיל והגדרות", style = MaterialTheme.typography.headlineLarge) }
+        item { Text("פרופיל", style = MaterialTheme.typography.headlineLarge) }
         item {
             GlassSurface(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -828,41 +828,6 @@ fun ProfileScreen(
                 }
             }
         }
-        item {
-            SettingsGroup("ערכת צבעים", Icons.Rounded.Palette) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        Triple(ThemeMode.SYSTEM, "מערכת", Icons.Rounded.Settings),
-                        Triple(ThemeMode.LIGHT, "בהיר", Icons.Rounded.LightMode),
-                        Triple(ThemeMode.DARK, "כהה", Icons.Rounded.DarkMode)
-                    ).forEach { option ->
-                        Pressable(
-                            onClick = { onTheme(option.first) },
-                            selected = state.settings.themeMode == option.first,
-                            modifier = Modifier.weight(1f),
-                            contentPadding = 10.dp
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(option.third, null, tint = if (state.settings.themeMode == option.first) StudyBlue else MaterialTheme.colorScheme.onSurface)
-                                Text(option.second, style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            SettingsGroup("נגישות ותנועה", Icons.Rounded.AutoAwesome) {
-                ToggleSetting("הפחתת תנועה", "מעדן מעברים ואפקטי spring", state.settings.reduceMotion, onReduceMotion)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ToggleSetting("משוב רטט", "רטט עדין בפעולות", state.settings.haptics, onHaptics)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ToggleSetting("השארת המסך דולק", "שימושי בזמן פתרון תרגילים", state.settings.keepScreenOn, onKeepScreenOn)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Text("גודל טקסט", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-                Slider(value = state.settings.fontScale, onValueChange = onFontScale, valueRange = .85f..1.35f)
-            }
-        }
         if (state.user != null) {
             item {
                 Pressable(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
@@ -874,12 +839,183 @@ fun ProfileScreen(
         }
         item {
             Text(
-                "StudyZone Android · ${BuildConfig.VERSION_NAME}\nNative Kotlin + Jetpack Compose",
+                "StudyZone · ${BuildConfig.VERSION_NAME}",
                 modifier = Modifier.fillMaxWidth().padding(20.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.labelMedium
             )
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    state: UiState,
+    onTheme: (ThemeMode) -> Unit,
+    onReduceMotion: (Boolean) -> Unit,
+    onHaptics: (Boolean) -> Unit,
+    onFontScale: (Float) -> Unit,
+    onKeepScreenOn: (Boolean) -> Unit,
+    onPersistChatHistory: (Boolean) -> Unit,
+    onRememberPosition: (Boolean) -> Unit,
+    onReadingProgress: (Boolean) -> Unit,
+    onGreenChecks: (Boolean) -> Unit,
+    onActionSuggestions: (Boolean) -> Unit,
+    onPromptNavigator: (Boolean) -> Unit,
+    onAskPopover: (Boolean) -> Unit,
+    onClearSelection: (Boolean) -> Unit,
+    onSystemNotifications: (Boolean) -> Unit,
+    onLoginNotifications: (Boolean) -> Unit,
+    onPasswordNotifications: (Boolean) -> Unit,
+    onLineSpacing: (Float) -> Unit,
+    onSelectionHighlight: (String) -> Unit,
+    onActiveTheme: (String) -> Unit,
+    onSaveApiKeys: (List<String>) -> Unit
+) {
+    var newApiKey by remember { mutableStateOf("") }
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 132.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text("הגדרות", style = MaterialTheme.typography.headlineLarge)
+            Text("כל הגדרות הממשק, הלמידה, פיתי והחשבון", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            SettingsGroup("מראה וקריאות", Icons.Rounded.Palette) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        Triple(ThemeMode.SYSTEM, "מערכת", Icons.Rounded.Settings),
+                        Triple(ThemeMode.LIGHT, "בהיר", Icons.Rounded.LightMode),
+                        Triple(ThemeMode.DARK, "כהה", Icons.Rounded.DarkMode)
+                    ).forEach { option ->
+                        Pressable(
+                            onClick = { onTheme(option.first) },
+                            selected = state.settings.themeMode == option.first,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = 9.dp
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(option.third, null, tint = if (state.settings.themeMode == option.first) StudyBlue else MaterialTheme.colorScheme.onSurface)
+                                Text(option.second, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+                Text("גודל טקסט", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+                Slider(value = state.settings.fontScale, onValueChange = onFontScale, valueRange = .85f..1.35f)
+                Text("מרווח שורות", fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(1f to "רגיל", 1.16f to "מרווח", 1.3f to "רחב").forEach { option ->
+                        Pressable(
+                            onClick = { onLineSpacing(option.first) },
+                            selected = kotlin.math.abs(state.settings.lineSpacing - option.first) < .05f,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = 8.dp
+                        ) { Text(option.second, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+                Text("ערכת צבעים", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("default" to "קלאסי", "midnight" to "חצות", "ocean" to "אוקיינוס", "forest" to "יער", "sunset" to "שקיעה", "rose" to "ורד", "gold" to "זהב")) { theme ->
+                        Pressable(onClick = { onActiveTheme(theme.first) }, selected = state.settings.activeThemeId == theme.first, contentPadding = 9.dp) {
+                            Text(theme.second, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                Text("צבע סימון טקסט", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    items(listOf("default", "sunset", "mint", "sky", "butter", "lavender", "teal", "peach", "rose")) { color ->
+                        Pressable(onClick = { onSelectionHighlight(color) }, selected = state.settings.selectionHighlight == color, contentPadding = 9.dp) {
+                            Text(if (color == "default") "ברירת מחדל" else color, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            SettingsGroup("למידה", Icons.Rounded.School) {
+                ToggleSetting("זכירת מיקום גלילה", "חזרה למקום האחרון בקורס", state.settings.rememberPosition, onRememberPosition)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("מד התקדמות קריאה", "פס התקדמות בראש השיעור", state.settings.showReadingProgress, onReadingProgress)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("סימון וי ירוק", "סימון שיעורים שהושלמו", state.settings.showGreenChecks, onGreenChecks)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("השארת המסך פעיל", "מונע כיבוי בזמן קריאה", state.settings.keepScreenOn, onKeepScreenOn)
+            }
+        }
+        item {
+            SettingsGroup("פיתי וצ׳אט", Icons.Rounded.ChatBubbleOutline) {
+                ToggleSetting("שמירת היסטוריית צ׳אט", "השיחה תישמר בין פתיחות", state.settings.persistChatHistory, onPersistChatHistory)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("הצעות לפעולה", "כפתורי תגובה, תרגול ובחנים", state.settings.showActionSuggestions, onActionSuggestions)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("פורמטים בשיחה", "סרגל פורמטים בצד הצ׳אט", state.settings.showChatPromptNavigator, onPromptNavigator)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("שאל את פיתי על טקסט", "פעולות מהירות לאחר סימון טקסט", state.settings.enableAskPopover, onAskPopover)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("ניקוי סימון אוטומטי", "ביטול הסימון לאחר פתיחת הפעולה", state.settings.clearSelectionAfterPopover, onClearSelection)
+            }
+        }
+        item {
+            SettingsGroup("התראות", Icons.Rounded.NotificationsNone) {
+                ToggleSetting("התראות מערכת", "הרשאת Android להתראות חשובות", state.settings.systemNotifications, onSystemNotifications)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("מייל בעת התחברות", "התראה על כניסה לחשבון", state.settings.emailLoginNotifications, onLoginNotifications)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("מייל כשסיסמה משתנה", "התראה לאחר עדכון סיסמה", state.settings.emailPasswordNotifications, onPasswordNotifications)
+            }
+        }
+        item {
+            SettingsGroup("תנועה ומגע", Icons.Rounded.AutoAwesome) {
+                ToggleSetting("הפחתת תנועה", "ביטול springs והברקות לא חיוניות", state.settings.reduceMotion, onReduceMotion)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("משוב רטט", "רטט עדין בניווט ובפעולות", state.settings.haptics, onHaptics)
+            }
+        }
+        item {
+            SettingsGroup("מפתחות API", Icons.Rounded.Key) {
+                if (state.user == null) {
+                    Text("יש להתחבר כדי לנהל מפתחות Gemini אישיים.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text("המפתחות נשמרים ומסונכרנים דרך החשבון.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    state.userApiKeys.forEachIndexed { index, _ ->
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("••••••••••••  #${index + 1}", modifier = Modifier.weight(1f))
+                            TextButton(onClick = { onSaveApiKeys(state.userApiKeys.filterIndexed { keyIndex, _ -> keyIndex != index }) }) { Text("מחיקה") }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = newApiKey,
+                        onValueChange = { newApiKey = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        label = { Text("מפתח Gemini חדש") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        trailingIcon = { Icon(Icons.Rounded.Key, null) },
+                        shape = RoundedCornerShape(18.dp)
+                    )
+                    Pressable(
+                        onClick = {
+                            val key = newApiKey.trim()
+                            if (key.isNotBlank()) {
+                                onSaveApiKeys(state.userApiKeys + key)
+                                newApiKey = ""
+                            }
+                        },
+                        enabled = newApiKey.isNotBlank() && !state.apiKeysLoading,
+                        selected = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    ) {
+                        if (state.apiKeysLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Add, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("הוספת מפתח")
+                    }
+                }
+            }
         }
     }
 }

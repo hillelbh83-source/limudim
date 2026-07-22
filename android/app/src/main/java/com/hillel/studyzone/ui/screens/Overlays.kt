@@ -262,8 +262,8 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         listOf(
             Triple(RootTab.COURSES, Icons.Rounded.School, "לימודים"),
             Triple(RootTab.SEARCH, Icons.Rounded.Search, "חיפוש"),
-            Triple(RootTab.SAVED, Icons.Rounded.BookmarkBorder, "שמורים"),
-            Triple(RootTab.PROFILE, Icons.Rounded.Group, "פרופיל")
+            Triple(RootTab.PROFILE, Icons.Rounded.Group, "פרופיל"),
+            Triple(RootTab.SETTINGS, Icons.Rounded.Settings, "הגדרות")
         )
     }
     val activeIndex = tabs.indexOfFirst { it.first == active }.coerceAtLeast(0)

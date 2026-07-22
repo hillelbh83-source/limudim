@@ -1,6 +1,9 @@
 package com.hillel.studyzone
 
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -10,11 +13,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.credentials.CredentialManager
-import androidx.credentials.CustomCredential
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialCancellationException
-import androidx.credentials.exceptions.NoCredentialException
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -46,10 +44,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.unit.LayoutDirection.Rtl
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException as GoogleApiException
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
 import com.hillel.studyzone.ui.screens.AdminScreen
@@ -64,6 +64,7 @@ import com.hillel.studyzone.ui.screens.LessonScreen
 import com.hillel.studyzone.ui.screens.ProfileScreen
 import com.hillel.studyzone.ui.screens.SavedScreen
 import com.hillel.studyzone.ui.screens.SearchScreen
+import com.hillel.studyzone.ui.screens.SettingsScreen
 import com.hillel.studyzone.ui.components.LocalHapticsEnabled
 import com.hillel.studyzone.ui.components.LocalCourseWebView
 import com.hillel.studyzone.ui.theme.StudyZoneTheme
@@ -73,6 +74,25 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
     private var activeIntent by mutableStateOf<Intent?>(null)
+    private val googleSignInLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        try {
+            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(GoogleApiException::class.java)
+            val token = account.idToken.orEmpty()
+            if (token.isBlank()) error("Google לא החזירה אסימון התחברות")
+            viewModel.loginWithGoogle(token)
+        } catch (error: GoogleApiException) {
+            val message = when (error.statusCode) {
+                12501 -> "ההתחברות עם Google בוטלה"
+                10 -> "Google דחתה את חתימת האפליקציה (שגיאת OAuth 10)"
+                7 -> "לא היה חיבור ל־Google. נסו שוב"
+                else -> "ההתחברות עם Google נכשלה (קוד ${error.statusCode})"
+            }
+            viewModel.showMessage(message)
+        } catch (error: Throwable) {
+            viewModel.showMessage("ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -94,7 +114,12 @@ class MainActivity : ComponentActivity() {
             // A single collected snapshot drives both the theme and the screen. Keeping these in
             // the same composition frame prevents the icon from changing before the palette.
             val state by viewModel.state.collectAsStateWithLifecycle()
-            StudyZoneTheme(state.settings.themeMode, state.settings.fontScale) {
+            StudyZoneTheme(
+                state.settings.themeMode,
+                state.settings.fontScale,
+                state.settings.lineSpacing,
+                state.settings.activeThemeId
+            ) {
                 CompositionLocalProvider(
                     androidx.compose.ui.platform.LocalLayoutDirection provides Rtl,
                     LocalHapticsEnabled provides state.settings.haptics
@@ -112,39 +137,11 @@ class MainActivity : ComponentActivity() {
     }
 
     fun launchGoogleSignIn() {
-        lifecycleScope.launch {
-            runCatching {
-                val manager = CredentialManager.create(this@MainActivity)
-                // This flow is launched by an explicit Google button, so use Google's dedicated
-                // SiWG option. GetGoogleIdOption is intended for the general credential sheet and
-                // can reject an otherwise valid explicit sign-in request on some providers.
-                val credential = manager.getCredential(
-                    this@MainActivity,
-                    GetCredentialRequest.Builder()
-                        .addCredentialOption(
-                            GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
-                        )
-                        .build()
-                ).credential
-                if (
-                    credential !is CustomCredential ||
-                    credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                ) {
-                    error("Google לא החזירה פרטי התחברות תקינים")
-                }
-                GoogleIdTokenCredential.createFrom(credential.data).idToken
-            }.onSuccess(viewModel::loginWithGoogle)
-                .onFailure { error ->
-                    val message = when {
-                        error is GetCredentialCancellationException -> "ההתחברות עם Google בוטלה"
-                        error is NoCredentialException -> "לא נמצא חשבון Google זמין במכשיר"
-                        error.javaClass.simpleName.contains("Configuration", ignoreCase = true) ->
-                            "הגדרת Google של האפליקציה אינה תקינה. עדכנו את חתימת האפליקציה ונסו שוב"
-                        else -> "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}"
-                    }
-                    viewModel.showMessage(message)
-                }
-        }
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+            .requestEmail()
+            .build()
+        googleSignInLauncher.launch(GoogleSignIn.getClient(this, options).signInIntent)
     }
 }
 
@@ -171,6 +168,9 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
         }
         pendingAdminExport = null
         viewModel.consumeAdminExport()
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) viewModel.setSystemNotifications(false)
     }
 
     LaunchedEffect(Unit) {
@@ -265,17 +265,39 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                         }
                     )
                     RootTab.SEARCH -> SearchScreen(state, viewModel::setSearchQuery, viewModel::openLesson)
-                    RootTab.SAVED -> SavedScreen(state, viewModel::openLesson)
                     RootTab.PROFILE -> ProfileScreen(
                         state,
                         onAuth = { viewModel.setAuthOpen(true) },
                         onLogout = viewModel::logout,
-                        onAdmin = viewModel::openAdmin,
+                        onAdmin = viewModel::openAdmin
+                    )
+                    RootTab.SETTINGS -> SettingsScreen(
+                        state = state,
                         onTheme = viewModel::setTheme,
                         onReduceMotion = viewModel::setReduceMotion,
                         onHaptics = viewModel::setHaptics,
                         onFontScale = viewModel::setFontScale,
-                        onKeepScreenOn = viewModel::setKeepScreenOn
+                        onKeepScreenOn = viewModel::setKeepScreenOn,
+                        onPersistChatHistory = viewModel::setPersistChatHistory,
+                        onRememberPosition = viewModel::setRememberPosition,
+                        onReadingProgress = viewModel::setShowReadingProgress,
+                        onGreenChecks = viewModel::setShowGreenChecks,
+                        onActionSuggestions = viewModel::setShowActionSuggestions,
+                        onPromptNavigator = viewModel::setShowChatPromptNavigator,
+                        onAskPopover = viewModel::setEnableAskPopover,
+                        onClearSelection = viewModel::setClearSelectionAfterPopover,
+                        onSystemNotifications = { enabled ->
+                            viewModel.setSystemNotifications(enabled)
+                            if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        },
+                        onLoginNotifications = viewModel::setEmailLoginNotifications,
+                        onPasswordNotifications = viewModel::setEmailPasswordNotifications,
+                        onLineSpacing = viewModel::setLineSpacing,
+                        onSelectionHighlight = viewModel::setSelectionHighlight,
+                        onActiveTheme = viewModel::setActiveTheme,
+                        onSaveApiKeys = viewModel::saveUserApiKeys
                     )
                 }
             }

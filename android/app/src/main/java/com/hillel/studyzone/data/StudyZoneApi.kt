@@ -5,6 +5,7 @@ import android.net.Uri
 import android.webkit.CookieManager
 import com.hillel.studyzone.BuildConfig
 import com.hillel.studyzone.model.AccessRequest
+import com.hillel.studyzone.model.AppSettings
 import com.hillel.studyzone.model.AdminOverview
 import com.hillel.studyzone.model.AdminUser
 import com.hillel.studyzone.model.AdminUserDetails
@@ -275,6 +276,54 @@ class StudyZoneApi(context: Context) {
     }
 
     suspend fun syncProgress(completed: Set<String>) = syncUserData(completed, null)
+
+    suspend fun syncSettings(settings: AppSettings) = withContext(Dispatchers.IO) {
+        val fontSize = when {
+            settings.fontScale >= 1.22f -> "xl"
+            settings.fontScale >= 1.08f -> "large"
+            else -> "normal"
+        }
+        val lineHeight = when {
+            settings.lineSpacing >= 1.25f -> "loose"
+            settings.lineSpacing >= 1.1f -> "relaxed"
+            else -> "normal"
+        }
+        val siteSettings = JSONObject()
+            .put("themeMode", settings.themeMode.name.lowercase())
+            .put("persistChatHistory", settings.persistChatHistory)
+            .put("rememberPosition", settings.rememberPosition)
+            .put("showReadingProgress", settings.showReadingProgress)
+            .put("showGreenChecks", settings.showGreenChecks)
+            .put("showActionSuggestions", settings.showActionSuggestions)
+            .put("showChatPromptNavigator", settings.showChatPromptNavigator)
+            .put("enableAskPopover", settings.enableAskPopover)
+            .put("clearSelectionAfterPopover", settings.clearSelectionAfterPopover)
+            .put("reduceMotion", settings.reduceMotion)
+            .put("haptics", settings.haptics)
+            .put("keepScreenOn", settings.keepScreenOn)
+            .put("systemNotifications", settings.systemNotifications)
+            .put("selectionHighlight", settings.selectionHighlight)
+            .put("activeThemeId", settings.activeThemeId)
+            .put(
+                "emailNotifications",
+                JSONObject()
+                    .put("login", settings.emailLoginNotifications)
+                    .put("passwordChanged", settings.emailPasswordNotifications)
+            )
+            .put("typography", JSONObject().put("fontSize", fontSize).put("lineHeight", lineHeight))
+        postJson("/user/sync", JSONObject().put("data", JSONObject().put("settings", siteSettings)))
+        Unit
+    }
+
+    suspend fun userApiKeys(): List<String> = withContext(Dispatchers.IO) {
+        requestJson("/gemini/user-keys").optJSONArray("apiKeys").toStringList()
+    }
+
+    suspend fun saveUserApiKeys(keys: List<String>): List<String> = withContext(Dispatchers.IO) {
+        val normalized = keys.map(String::trim).filter(String::isNotBlank).distinct().take(10)
+        val response = putJson("/gemini/user-keys", JSONObject().put("apiKeys", JSONArray(normalized)))
+        response.optJSONArray("apiKeys").toStringList()
+    }
 
     /**
      * Syncs progress. Native lesson bookmarks remain local because the current
@@ -622,6 +671,11 @@ class StudyZoneApi(context: Context) {
         val builder = baseRequest(apiRoot + path).post(body.toString().toRequestBody(jsonType))
         headers.forEach { (name, value) -> builder.header(name, value) }
         return executeJson(builder.build())
+    }
+
+    private fun putJson(path: String, body: JSONObject): JSONObject {
+        val request = baseRequest(apiRoot + path).put(body.toString().toRequestBody(jsonType)).build()
+        return executeJson(request)
     }
 
     private fun deleteJson(path: String): JSONObject {

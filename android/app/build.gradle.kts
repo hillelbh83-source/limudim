@@ -20,8 +20,8 @@ android {
         applicationId = "com.hillel.studyzone"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "2.5.0"
+        versionCode = 8
+        versionName = "2.6.0"
 
         buildConfigField(
             "String",
@@ -83,6 +83,7 @@ dependencies {
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
+    implementation("com.google.android.gms:play-services-auth:21.6.0")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

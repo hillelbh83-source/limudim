@@ -57,6 +57,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var bootstrapJob: Job? = null
     private var bootstrapGeneration = 0L
     private var cacheJob: Job? = null
+    private var settingsSyncJob: Job? = null
     private var adminJob: Job? = null
     private var adminGeneration = 0L
     private var chatCall: Call? = null
@@ -201,6 +202,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update {
             it.copy(rootTab = tab, selectedCourse = null, lesson = null, lessonLoading = false)
         }
+        if (tab == RootTab.SETTINGS && mutableState.value.user != null) loadUserApiKeys()
     }
 
     fun openCourse(course: Course) {
@@ -365,10 +367,51 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setHaptics(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(haptics = enabled))
     fun setFontScale(scale: Float) = updateSettings(mutableState.value.settings.copy(fontScale = scale.coerceIn(.85f, 1.35f)))
     fun setKeepScreenOn(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(keepScreenOn = enabled))
+    fun setPersistChatHistory(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(persistChatHistory = enabled))
+    fun setRememberPosition(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(rememberPosition = enabled))
+    fun setShowReadingProgress(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(showReadingProgress = enabled))
+    fun setShowGreenChecks(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(showGreenChecks = enabled))
+    fun setShowActionSuggestions(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(showActionSuggestions = enabled))
+    fun setShowChatPromptNavigator(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(showChatPromptNavigator = enabled))
+    fun setEnableAskPopover(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(enableAskPopover = enabled))
+    fun setClearSelectionAfterPopover(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(clearSelectionAfterPopover = enabled))
+    fun setSystemNotifications(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(systemNotifications = enabled))
+    fun setEmailLoginNotifications(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(emailLoginNotifications = enabled))
+    fun setEmailPasswordNotifications(enabled: Boolean) = updateSettings(mutableState.value.settings.copy(emailPasswordNotifications = enabled))
+    fun setLineSpacing(scale: Float) = updateSettings(mutableState.value.settings.copy(lineSpacing = scale.coerceIn(1f, 1.35f)))
+    fun setSelectionHighlight(value: String) = updateSettings(mutableState.value.settings.copy(selectionHighlight = value))
+    fun setActiveTheme(value: String) = updateSettings(mutableState.value.settings.copy(activeThemeId = value))
 
     private fun updateSettings(settings: AppSettings) {
         mutableState.update { it.copy(settings = settings) }
         viewModelScope.launch { preferences.saveSettings(settings) }
+        settingsSyncJob?.cancel()
+        if (mutableState.value.user != null) {
+            settingsSyncJob = viewModelScope.launch {
+                delay(650)
+                runCatching { api.syncSettings(settings) }
+            }
+        }
+    }
+
+    fun loadUserApiKeys() {
+        if (mutableState.value.user == null || mutableState.value.apiKeysLoading) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(apiKeysLoading = true) }
+            runCatching { api.userApiKeys() }
+                .onSuccess { keys -> mutableState.update { it.copy(userApiKeys = keys, apiKeysLoading = false) } }
+                .onFailure { error -> mutableState.update { it.copy(apiKeysLoading = false, toast = error.userMessage("טעינת מפתחות API נכשלה")) } }
+        }
+    }
+
+    fun saveUserApiKeys(keys: List<String>) {
+        if (mutableState.value.user == null || mutableState.value.apiKeysLoading) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(apiKeysLoading = true) }
+            runCatching { api.saveUserApiKeys(keys) }
+                .onSuccess { saved -> mutableState.update { it.copy(userApiKeys = saved, apiKeysLoading = false, toast = "מפתחות ה־API נשמרו") } }
+                .onFailure { error -> mutableState.update { it.copy(apiKeysLoading = false, toast = error.userMessage("שמירת מפתחות API נכשלה")) } }
+        }
     }
 
     fun setAuthOpen(open: Boolean) = mutableState.update { it.copy(authOpen = open) }
@@ -541,6 +584,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 deniedCourseIds = emptySet(),
                 authOpen = false,
                 authLoading = false,
+                userApiKeys = emptyList(),
+                apiKeysLoading = false,
                 adminOpen = false,
                 adminOverview = null,
                 adminUsers = emptyList(),

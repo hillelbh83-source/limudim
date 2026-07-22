@@ -36,6 +36,20 @@ class LocalPreferences(private val context: Context) {
         val haptics = booleanPreferencesKey("haptics")
         val fontScale = floatPreferencesKey("font_scale")
         val keepScreenOn = booleanPreferencesKey("keep_screen_on")
+        val persistChatHistory = booleanPreferencesKey("persist_chat_history")
+        val rememberPosition = booleanPreferencesKey("remember_position")
+        val showReadingProgress = booleanPreferencesKey("show_reading_progress")
+        val showGreenChecks = booleanPreferencesKey("show_green_checks")
+        val showActionSuggestions = booleanPreferencesKey("show_action_suggestions")
+        val showChatPromptNavigator = booleanPreferencesKey("show_chat_prompt_navigator")
+        val enableAskPopover = booleanPreferencesKey("enable_ask_popover")
+        val clearSelectionAfterPopover = booleanPreferencesKey("clear_selection_after_popover")
+        val systemNotifications = booleanPreferencesKey("system_notifications")
+        val emailLoginNotifications = booleanPreferencesKey("email_login_notifications")
+        val emailPasswordNotifications = booleanPreferencesKey("email_password_notifications")
+        val lineSpacing = floatPreferencesKey("line_spacing")
+        val selectionHighlight = stringPreferencesKey("selection_highlight")
+        val activeThemeId = stringPreferencesKey("active_theme_id")
         val completed = stringPreferencesKey("completed_sections")
         val bookmarks = stringPreferencesKey("bookmarked_sections")
         val courses = stringPreferencesKey("cached_courses_v1")
@@ -59,7 +73,21 @@ class LocalPreferences(private val context: Context) {
                     reduceMotion = prefs[Keys.reduceMotion] ?: false,
                     haptics = prefs[Keys.haptics] ?: true,
                     fontScale = (prefs[Keys.fontScale] ?: 1f).coerceIn(.85f, 1.35f),
-                    keepScreenOn = prefs[Keys.keepScreenOn] ?: false
+                    keepScreenOn = prefs[Keys.keepScreenOn] ?: false,
+                    persistChatHistory = prefs[Keys.persistChatHistory] ?: true,
+                    rememberPosition = prefs[Keys.rememberPosition] ?: true,
+                    showReadingProgress = prefs[Keys.showReadingProgress] ?: false,
+                    showGreenChecks = prefs[Keys.showGreenChecks] ?: true,
+                    showActionSuggestions = prefs[Keys.showActionSuggestions] ?: true,
+                    showChatPromptNavigator = prefs[Keys.showChatPromptNavigator] ?: true,
+                    enableAskPopover = prefs[Keys.enableAskPopover] ?: true,
+                    clearSelectionAfterPopover = prefs[Keys.clearSelectionAfterPopover] ?: false,
+                    systemNotifications = prefs[Keys.systemNotifications] ?: false,
+                    emailLoginNotifications = prefs[Keys.emailLoginNotifications] ?: true,
+                    emailPasswordNotifications = prefs[Keys.emailPasswordNotifications] ?: true,
+                    lineSpacing = (prefs[Keys.lineSpacing] ?: 1f).coerceIn(1f, 1.35f),
+                    selectionHighlight = prefs[Keys.selectionHighlight] ?: "default",
+                    activeThemeId = prefs[Keys.activeThemeId] ?: "default"
                 ),
                 completed = decodeSet(prefs[Keys.completed]),
                 bookmarks = decodeSet(prefs[Keys.bookmarks]),
@@ -75,6 +103,20 @@ class LocalPreferences(private val context: Context) {
             prefs[Keys.haptics] = settings.haptics
             prefs[Keys.fontScale] = settings.fontScale
             prefs[Keys.keepScreenOn] = settings.keepScreenOn
+            prefs[Keys.persistChatHistory] = settings.persistChatHistory
+            prefs[Keys.rememberPosition] = settings.rememberPosition
+            prefs[Keys.showReadingProgress] = settings.showReadingProgress
+            prefs[Keys.showGreenChecks] = settings.showGreenChecks
+            prefs[Keys.showActionSuggestions] = settings.showActionSuggestions
+            prefs[Keys.showChatPromptNavigator] = settings.showChatPromptNavigator
+            prefs[Keys.enableAskPopover] = settings.enableAskPopover
+            prefs[Keys.clearSelectionAfterPopover] = settings.clearSelectionAfterPopover
+            prefs[Keys.systemNotifications] = settings.systemNotifications
+            prefs[Keys.emailLoginNotifications] = settings.emailLoginNotifications
+            prefs[Keys.emailPasswordNotifications] = settings.emailPasswordNotifications
+            prefs[Keys.lineSpacing] = settings.lineSpacing
+            prefs[Keys.selectionHighlight] = settings.selectionHighlight
+            prefs[Keys.activeThemeId] = settings.activeThemeId
         }
     }
 

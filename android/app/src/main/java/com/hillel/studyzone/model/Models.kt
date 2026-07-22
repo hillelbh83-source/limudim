@@ -2,7 +2,7 @@ package com.hillel.studyzone.model
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-enum class RootTab { COURSES, SEARCH, SAVED, PROFILE }
+enum class RootTab { COURSES, SEARCH, PROFILE, SETTINGS }
 
 data class Section(
     val id: String,
@@ -147,7 +147,21 @@ data class AppSettings(
     val reduceMotion: Boolean = false,
     val haptics: Boolean = true,
     val fontScale: Float = 1f,
-    val keepScreenOn: Boolean = false
+    val keepScreenOn: Boolean = false,
+    val persistChatHistory: Boolean = true,
+    val rememberPosition: Boolean = true,
+    val showReadingProgress: Boolean = false,
+    val showGreenChecks: Boolean = true,
+    val showActionSuggestions: Boolean = true,
+    val showChatPromptNavigator: Boolean = true,
+    val enableAskPopover: Boolean = true,
+    val clearSelectionAfterPopover: Boolean = false,
+    val systemNotifications: Boolean = false,
+    val emailLoginNotifications: Boolean = true,
+    val emailPasswordNotifications: Boolean = true,
+    val lineSpacing: Float = 1f,
+    val selectionHighlight: String = "default",
+    val activeThemeId: String = "default"
 )
 
 data class UiState(
@@ -174,6 +188,8 @@ data class UiState(
     val deniedCourseIds: Set<String> = emptySet(),
     val authOpen: Boolean = false,
     val authLoading: Boolean = false,
+    val userApiKeys: List<String> = emptyList(),
+    val apiKeysLoading: Boolean = false,
     val adminOpen: Boolean = false,
     val adminOverview: AdminOverview? = null,
     val adminUsers: List<AdminUser> = emptyList(),

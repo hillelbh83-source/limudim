@@ -19,6 +19,12 @@
           localStorage.setItem(key, JSON.stringify({ ...current, theme: requested, themeMode: requested }));
         } catch (_) {}
       })();
+      window.addEventListener('error', (event) => {
+        window.StudyZoneCourse?.error?.(event.message || 'JavaScript error');
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        window.StudyZoneCourse?.error?.(String(event.reason?.message || event.reason || 'Promise error'));
+      });
     </script>
     <script type="module" crossorigin src="/app/assets/e.B3PKpPBA.js"></script>
     <link rel="stylesheet" crossorigin href="/app/assets/a.B0BEVcYV.css">

@@ -4,12 +4,15 @@ import android.graphics.Color
 import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.ConsoleMessage
 import android.webkit.MimeTypeMap
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebChromeClient
 import android.webkit.WebViewClient
+import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
@@ -37,6 +40,7 @@ import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
+import com.hillel.studyzone.BuildConfig
 import kotlinx.coroutines.delay
 
 /**
@@ -66,6 +70,7 @@ fun LocalCourseWebView(
     val webView = remember(courseId, darkMode) {
         WebView(context).apply {
             setBackgroundColor(background)
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             overScrollMode = WebView.OVER_SCROLL_NEVER
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
@@ -78,12 +83,28 @@ fun LocalCourseWebView(
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 mediaPlaybackRequiresUserGesture = true
                 setSupportZoom(false)
-                cacheMode = WebSettings.LOAD_DEFAULT
+                // APK updates replace hashed course chunks. Never reuse an HTML entry cached by
+                // an older APK, because it can point at chunks that no longer exist and render a
+                // completely blank page.
+                cacheMode = WebSettings.LOAD_NO_CACHE
             }
+            val courseView = this
             addJavascriptInterface(
                 CourseReadyBridge(
-                    onReady = { post { ready = true; error = null } },
-                    onError = { message -> post { error = message.ifBlank { "תוכן הקורס לא נטען" } } }
+                    onReady = {
+                        courseView.postDelayed({
+                            courseView.evaluateJavascript("document.body && document.body.innerText.trim().length") { length ->
+                                val textLength = length.trim('"').toIntOrNull() ?: 0
+                                if (textLength > 20) {
+                                    ready = true
+                                    error = null
+                                } else {
+                                    error = "רכיבי הקורס נטענו ללא תוכן נראה"
+                                }
+                            }
+                        }, 180L)
+                    },
+                    onError = { message -> courseView.post { error = message.ifBlank { "תוכן הקורס לא נטען" } } }
                 ),
                 "StudyZoneCourse"
             )
@@ -95,11 +116,20 @@ fun LocalCourseWebView(
             webViewClient = LocalCourseClient(loader, context.assets) { message ->
                 post { error = message }
             }
-            loadUrl(
-                LOCAL_COURSE_URL + "?course=" + Uri.encode(courseId) +
-                    "&theme=" + (if (darkMode) "dark" else "light")
-            )
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                        post { error = "שגיאת renderer: ${message.message().take(160)}" }
+                    }
+                    return true
+                }
+            }
         }
+    }
+    val courseUrl = remember(courseId, darkMode) {
+        LOCAL_COURSE_URL + "?course=" + Uri.encode(courseId) +
+            "&theme=" + (if (darkMode) "dark" else "light") +
+            "&v=" + BuildConfig.VERSION_CODE
     }
 
     BackHandler(onBack = onBack)
@@ -113,7 +143,13 @@ fun LocalCourseWebView(
 
     Box(modifier.fillMaxSize()) {
         AndroidView(
-            factory = { webView },
+            factory = {
+                webView.apply {
+                    visibility = View.VISIBLE
+                    alpha = 1f
+                    post { loadUrl(courseUrl) }
+                }
+            },
             modifier = Modifier.fillMaxSize().background(if (darkMode) ComposeColor(0xFF020617) else ComposeColor(0xFFF8FAFC))
         )
         if (!ready || error != null) {
