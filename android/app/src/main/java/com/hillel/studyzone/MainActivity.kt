@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -106,7 +107,13 @@ class MainActivity : ComponentActivity() {
                 .ifBlank { error("Google לא החזירה אסימון התחברות") }
         }.onSuccess(viewModel::loginWithGoogle)
             .onFailure { error ->
-                viewModel.showMessage("ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "בדקו את הגדרת OAuth של האפליקציה" }}")
+                viewModel.showMessage(
+                    if (error is ApiException && error.statusCode == 10) {
+                        "Google OAuth חסום: יש לרשום com.hillel.studyzone עם חתימת SHA-1 של ה-APK ב-Google Auth Platform"
+                    } else {
+                        "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "בדקו את הגדרת OAuth של האפליקציה" }}"
+                    }
+                )
             }
     }
 
@@ -226,6 +233,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
     var introVisible by rememberSaveable { mutableStateOf(true) }
     var handledDeepLink by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingAdminExport by remember { mutableStateOf<String?>(null) }
+    var themeRevealOrigin by remember { mutableStateOf(Offset(82f, 56f)) }
     val adminExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -329,7 +337,8 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                         onCourse = viewModel::openCourse,
                         onProfile = { viewModel.selectTab(RootTab.PROFILE) },
                         darkMode = resolvedDark,
-                        onThemeToggle = {
+                        onThemeToggle = { origin ->
+                            themeRevealOrigin = origin
                             // SYSTEM means the current phone palette, so the first tap must always
                             // create a visible change instead of merely replacing SYSTEM with DARK.
                             viewModel.setTheme(if (resolvedDark) ThemeMode.LIGHT else ThemeMode.DARK)
@@ -350,7 +359,10 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                     )
                     RootTab.SETTINGS -> SettingsScreen(
                         state = state,
-                        onTheme = viewModel::setTheme,
+                        onTheme = { mode, origin ->
+                            themeRevealOrigin = origin
+                            viewModel.setTheme(mode)
+                        },
                         onReduceMotion = viewModel::setReduceMotion,
                         onHaptics = viewModel::setHaptics,
                         onFontScale = viewModel::setFontScale,
@@ -380,7 +392,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
             }
         }
 
-        if (selectedCourse == null && state.lesson == null && !state.lessonLoading && !state.adminOpen && !state.chatOpen) {
+        if (selectedCourse == null && state.lesson == null && !state.lessonLoading && !state.adminOpen) {
             BottomGlassNav(
                 active = state.rootTab,
                 onTab = viewModel::selectTab,
@@ -400,11 +412,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onSend = viewModel::sendChat,
                 onStop = viewModel::stopChat,
                 onClear = viewModel::clearChat,
-                modifier = if (state.chatOpen) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp)
-                }
+                modifier = Modifier.fillMaxSize()
             )
         }
 
@@ -452,7 +460,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
         }
 
         IntroSplash(introVisible)
-        if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background)
+        if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background, themeRevealOrigin)
     }
 }
 

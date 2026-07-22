@@ -103,7 +103,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -126,10 +129,11 @@ fun CoursesScreen(
     onCourse: (Course) -> Unit,
     onProfile: () -> Unit,
     darkMode: Boolean,
-    onThemeToggle: () -> Unit,
+    onThemeToggle: (Offset) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var category by remember { mutableStateOf("all") }
+    var themeButtonCenter by remember { mutableStateOf(Offset.Zero) }
     val categories = listOf(
         "all" to "הכול",
         "math" to "מתמטיקה",
@@ -181,7 +185,11 @@ fun CoursesScreen(
                 RoundActionButton(
                     icon = if (darkMode) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
                     contentDescription = "החלפת ערכת צבעים",
-                    onClick = onThemeToggle,
+                    onClick = { onThemeToggle(themeButtonCenter) },
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        val topLeft = coordinates.positionInRoot()
+                        themeButtonCenter = topLeft + Offset(coordinates.size.width / 2f, coordinates.size.height / 2f)
+                    },
                     size = 46.dp
                 )
                 Spacer(Modifier.width(8.dp))
@@ -1120,7 +1128,7 @@ fun ProfileScreen(
 @Composable
 fun SettingsScreen(
     state: UiState,
-    onTheme: (ThemeMode) -> Unit,
+    onTheme: (ThemeMode, Offset) -> Unit,
     onReduceMotion: (Boolean) -> Unit,
     onHaptics: (Boolean) -> Unit,
     onFontScale: (Float) -> Unit,
@@ -1170,10 +1178,14 @@ fun SettingsScreen(
                         Triple(ThemeMode.LIGHT, "בהיר", Icons.Rounded.LightMode),
                         Triple(ThemeMode.DARK, "כהה", Icons.Rounded.DarkMode)
                     ).forEach { option ->
+                        var optionCenter by remember(option.first) { mutableStateOf(Offset.Zero) }
                         Pressable(
-                            onClick = { onTheme(option.first) },
+                            onClick = { onTheme(option.first, optionCenter) },
                             selected = state.settings.themeMode == option.first,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).onGloballyPositioned { coordinates ->
+                                val topLeft = coordinates.positionInRoot()
+                                optionCenter = topLeft + Offset(coordinates.size.width / 2f, coordinates.size.height / 2f)
+                            },
                             contentPadding = 9.dp
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {

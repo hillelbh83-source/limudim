@@ -10,6 +10,9 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.MotionEvent
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -233,6 +236,13 @@ private class LocalRendererWebView(context: Context) : WebView(context) {
     private var pendingCall: String? = null
     private var lastSubmission: Int? = null
 
+    override fun startActionMode(callback: ActionMode.Callback?, type: Int): ActionMode? =
+        callback?.let { super.startActionMode(SelectionOnlyActionModeCallback(it), type) }
+
+    @Suppress("DEPRECATION")
+    override fun startActionMode(callback: ActionMode.Callback?): ActionMode? =
+        callback?.let { super.startActionMode(SelectionOnlyActionModeCallback(it)) }
+
     fun submit(function: String, argument: String) {
         val signature = 31 * function.hashCode() + argument.hashCode()
         if (lastSubmission == signature) return
@@ -252,6 +262,25 @@ private class LocalRendererWebView(context: Context) : WebView(context) {
         pendingCall = null
         evaluateJavascript(script, null)
     }
+}
+
+private class SelectionOnlyActionModeCallback(
+    private val delegate: ActionMode.Callback
+) : ActionMode.Callback {
+    override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+        val created = delegate.onCreateActionMode(mode, menu)
+        menu.clear()
+        return created
+    }
+
+    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
+        delegate.onPrepareActionMode(mode, menu)
+        menu.clear()
+        return true
+    }
+
+    override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean = false
+    override fun onDestroyActionMode(mode: ActionMode) = delegate.onDestroyActionMode(mode)
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -367,10 +396,11 @@ private fun lessonShell(
               popover.style.left = Math.max(72, Math.min(window.innerWidth - 72, rect.left + rect.width / 2)) + 'px';
               popover.style.top = Math.max(54, rect.top - 8) + 'px';
               popover.style.display = 'block';
-            }, 30);
+            }, 110);
           }
-          document.addEventListener('selectionchange', updateSelectionPopover);
+          document.addEventListener('touchstart', function() { popover.style.display = 'none'; });
           document.addEventListener('touchend', updateSelectionPopover);
+          document.addEventListener('mouseup', updateSelectionPopover);
           popover.addEventListener('click', function() {
             if (selectedText && window.AndroidSelection) AndroidSelection.ask(selectedText);
             popover.style.display = 'none';

@@ -38,6 +38,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -99,6 +101,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,6 +127,8 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
@@ -146,6 +151,7 @@ import com.hillel.studyzone.ui.components.RoundActionButton
 import com.hillel.studyzone.ui.theme.StudyBlue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.hypot
 
@@ -236,7 +242,7 @@ fun IntroSplash(visible: Boolean) {
 
 /** Circular palette reveal matching the website's theme transition without capturing a bitmap. */
 @Composable
-fun ThemeRevealOverlay(background: Color) {
+fun ThemeRevealOverlay(background: Color, requestedOrigin: Offset) {
     var previousBackground by remember { mutableStateOf(background) }
     var overlayColor by remember { mutableStateOf(background) }
     val progress = remember { Animatable(1f) }
@@ -254,8 +260,17 @@ fun ThemeRevealOverlay(background: Color) {
                 compositingStrategy = CompositingStrategy.Offscreen
             }
         ) {
-            val origin = Offset(82.dp.toPx(), 56.dp.toPx())
-            val radius = hypot(size.width - origin.x, size.height - origin.y) * progress.value
+            val origin = Offset(
+                requestedOrigin.x.coerceIn(0f, size.width),
+                requestedOrigin.y.coerceIn(0f, size.height)
+            )
+            val maxRadius = maxOf(
+                hypot(origin.x, origin.y),
+                hypot(size.width - origin.x, origin.y),
+                hypot(origin.x, size.height - origin.y),
+                hypot(size.width - origin.x, size.height - origin.y)
+            )
+            val radius = maxRadius * progress.value
             drawRect(overlayColor)
             drawCircle(Color.Transparent, radius = radius, center = origin, blendMode = BlendMode.Clear)
         }
@@ -532,17 +547,6 @@ fun ChatOverlay(
     onClear: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (!state.chatOpen) {
-        RoundActionButton(
-            icon = Icons.Rounded.SmartToy,
-            contentDescription = "פתיחת Pythi",
-            onClick = { onOpen(true) },
-            modifier = modifier,
-            active = true,
-            size = 58.dp
-        )
-        return
-    }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -553,22 +557,59 @@ fun ChatOverlay(
             Unit
         }
     }
-    val sheetFraction by animateFloatAsState(
-        targetValue = if (state.chatExpanded) .94f else .64f,
-        animationSpec = tween(durationMillis = if (state.settings.reduceMotion) 0 else 230, easing = FastOutSlowInEasing),
-        label = "pythiSheetHeight"
-    )
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    val keyboardVisible = imeBottom > 0
+    val targetSheetFraction = when {
+            state.chatExpanded -> .96f
+            keyboardVisible -> .74f
+            else -> .64f
+        }
+    val sheetFraction = remember { Animatable(targetSheetFraction) }
+    val dragScope = rememberCoroutineScope()
     var dragDistance by remember { mutableFloatStateOf(0f) }
-    AnimatedVisibility(
+    var dragStartFraction by remember { mutableFloatStateOf(targetSheetFraction) }
+    LaunchedEffect(targetSheetFraction) {
+        sheetFraction.animateTo(
+            targetSheetFraction,
+            tween(durationMillis = if (state.settings.reduceMotion) 0 else 230, easing = FastOutSlowInEasing)
+        )
+    }
+    Box(modifier.fillMaxSize()) {
+      AnimatedVisibility(
+        visible = !state.chatOpen,
+        modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding()
+            .padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp),
+        enter = fadeIn() + scaleIn(initialScale = .82f),
+        exit = fadeOut() + scaleOut(targetScale = .82f)
+      ) {
+        RoundActionButton(
+            icon = Icons.Rounded.SmartToy,
+            contentDescription = "פתיחת Pythi",
+            onClick = { onOpen(true) },
+            active = true,
+            size = 58.dp
+        )
+      }
+      AnimatedVisibility(
         visible = state.chatOpen,
         enter = fadeIn() + slideInVertically(initialOffsetY = { it / 8 }),
         exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 8 })
     ) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+          val availableHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+          Box(
+              Modifier.fillMaxSize().clickable(
+                  interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                  indication = null
+              ) { dismissKeyboard(); onOpen(false) }
+          )
           Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(sheetFraction)
+                .fillMaxHeight(sheetFraction.value)
+                .padding(
+                    bottom = if (!state.chatExpanded && !keyboardVisible && state.lesson == null && state.selectedCourse == null) 92.dp else 0.dp
+                )
                 .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .background(MaterialTheme.colorScheme.background)
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .65f), RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
@@ -578,12 +619,22 @@ fun ChatOverlay(
             Box(
                 Modifier.fillMaxWidth().height(22.dp).pointerInput(state.chatExpanded) {
                     detectVerticalDragGestures(
-                        onDragStart = { dragDistance = 0f },
-                        onVerticalDrag = { _, amount -> dragDistance += amount },
+                        onDragStart = {
+                            dragDistance = 0f
+                            dragStartFraction = sheetFraction.value
+                            dragScope.launch { sheetFraction.stop() }
+                        },
+                        onVerticalDrag = { _, amount ->
+                            dragDistance += amount
+                            val next = (dragStartFraction - dragDistance / availableHeightPx).coerceIn(.46f, .98f)
+                            dragScope.launch { sheetFraction.snapTo(next) }
+                        },
                         onDragEnd = {
-                            when {
-                                dragDistance < -55f -> onExpanded(true)
-                                dragDistance > 55f -> onExpanded(false)
+                            val expand = sheetFraction.value >= .80f
+                            onExpanded(expand)
+                            val destination = if (expand) .96f else if (keyboardVisible) .74f else .64f
+                            dragScope.launch {
+                                sheetFraction.animateTo(destination, tween(220, easing = FastOutSlowInEasing))
                             }
                             dragDistance = 0f
                         },
@@ -722,6 +773,7 @@ fun ChatOverlay(
             )
           }
         }
+      }
     }
 }
 
@@ -743,12 +795,30 @@ private fun PythiComposer(
     val composerColor = MaterialTheme.colorScheme.surfaceVariant
     val contentColor = MaterialTheme.colorScheme.onSurface
     val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val rtlAnchor = "\u200F"
+    var fieldValue by remember { mutableStateOf(TextFieldValue(input, selection = TextRange(input.length))) }
+    LaunchedEffect(input) {
+        if (input != fieldValue.text) {
+            fieldValue = TextFieldValue(input, selection = TextRange(input.length))
+        }
+    }
 
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
+        val displayedValue = if (fieldValue.text.isEmpty()) {
+            TextFieldValue(rtlAnchor, selection = TextRange(1))
+        } else fieldValue
         androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
             androidx.compose.foundation.text.BasicTextField(
-                value = input,
-                onValueChange = onInput,
+                value = displayedValue,
+                onValueChange = { updated ->
+                    val anchored = updated.text.startsWith(rtlAnchor)
+                    val cleanText = updated.text.replace(rtlAnchor, "")
+                    val selectionShift = if (anchored) 1 else 0
+                    val start = (updated.selection.start - selectionShift).coerceIn(0, cleanText.length)
+                    val end = (updated.selection.end - selectionShift).coerceIn(0, cleanText.length)
+                    fieldValue = TextFieldValue(cleanText, selection = TextRange(start, end))
+                    if (cleanText != input) onInput(cleanText)
+                },
                 modifier = fieldModifier.fillMaxWidth().focusRequester(focusRequester),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = contentColor,
