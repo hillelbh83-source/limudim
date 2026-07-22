@@ -8,6 +8,9 @@ plugins {
 val studyZoneApiUrl = providers.gradleProperty("STUDYZONE_API_URL")
     .orElse(providers.environmentVariable("STUDYZONE_API_URL"))
     .getOrElse("https://studyzone-cpav.onrender.com")
+val studyZoneWebUrl = providers.gradleProperty("STUDYZONE_WEB_URL")
+    .orElse(providers.environmentVariable("STUDYZONE_WEB_URL"))
+    .getOrElse("https://studyzone-1-yhnz.onrender.com")
 val googleWebClientId = providers.gradleProperty("GOOGLE_WEB_CLIENT_ID")
     .orElse(providers.environmentVariable("GOOGLE_WEB_CLIENT_ID"))
     .getOrElse("126122580284-a7rlabpvmfumcsopjt2v97eci8det4jp.apps.googleusercontent.com")
@@ -20,13 +23,18 @@ android {
         applicationId = "com.hillel.studyzone"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "2.6.0"
+        versionCode = 15
+        versionName = "2.9.1"
 
         buildConfigField(
             "String",
             "API_BASE_URL",
             "\"$studyZoneApiUrl\""
+        )
+        buildConfigField(
+            "String",
+            "WEB_BASE_URL",
+            "\"$studyZoneWebUrl\""
         )
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
     }
@@ -74,6 +82,9 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
+    // Lint's Activity Result detector requires an explicit modern Fragment artifact even though
+    // this Compose-only app hosts no fragments. Keep it aligned with the current stable release.
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")

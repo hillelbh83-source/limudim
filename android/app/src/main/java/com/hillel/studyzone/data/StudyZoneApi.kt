@@ -10,6 +10,7 @@ import com.hillel.studyzone.model.AdminOverview
 import com.hillel.studyzone.model.AdminUser
 import com.hillel.studyzone.model.AdminUserDetails
 import com.hillel.studyzone.model.Chapter
+import com.hillel.studyzone.model.ChatAttachment
 import com.hillel.studyzone.model.Course
 import com.hillel.studyzone.model.Lesson
 import com.hillel.studyzone.model.SearchResult
@@ -68,6 +69,7 @@ class StudyZoneApi(context: Context) {
         val user: User?,
         val completedSections: Set<String>,
         val bookmarkedSections: Set<String> = emptySet(),
+        val pythiMemories: Map<String, String> = emptyMap(),
         val courseAccess: CourseAccess = CourseAccess()
     )
 
@@ -83,15 +85,19 @@ class StudyZoneApi(context: Context) {
     data class AccountSnapshot(
         val user: User?,
         val completedSections: Set<String>,
-        val bookmarkedSections: Set<String>
+        val bookmarkedSections: Set<String>,
+        val pythiMemories: Map<String, String> = emptyMap()
     )
 
     data class LoginResult(
         val user: User,
         val completedSections: Set<String>,
         val bookmarkedSections: Set<String>,
+        val pythiMemories: Map<String, String>,
         val courseAccess: CourseAccess
     )
+
+    data class ToolCall(val name: String, val arguments: JSONObject)
 
     data class AdminData(
         val overview: AdminOverview,
@@ -112,7 +118,8 @@ class StudyZoneApi(context: Context) {
             courses = content.bundledCourses,
             user = cached.user,
             completedSections = cached.completedSections,
-            bookmarkedSections = cached.bookmarkedSections
+            bookmarkedSections = cached.bookmarkedSections,
+            pythiMemories = cached.pythiMemories
         )
     }
 
@@ -131,6 +138,7 @@ class StudyZoneApi(context: Context) {
             user = account.user,
             completedSections = account.completedSections,
             bookmarkedSections = account.bookmarkedSections,
+            pythiMemories = account.pythiMemories,
             courseAccess = courseAccess
         )
     }
@@ -181,6 +189,61 @@ class StudyZoneApi(context: Context) {
         finishLogin(generation, loginBody)
     }
 
+    suspend fun updateProfileName(displayName: String): User = withContext(Dispatchers.IO) {
+        val current = readCachedAccount().user ?: throw ApiException("יש להתחבר כדי לעדכן את הפרופיל", 401)
+        postJson(
+            "/auth/update-profile",
+            JSONObject().put("email", current.email).put("displayName", displayName.trim())
+        )
+        refreshAccountInternal(null).user ?: current.copy(displayName = displayName.trim())
+    }
+
+    suspend fun updateProfilePhoto(photoDataUrl: String): User = withContext(Dispatchers.IO) {
+        val current = readCachedAccount().user ?: throw ApiException("יש להתחבר כדי לעדכן את הפרופיל", 401)
+        postJson(
+            "/auth/update-profile",
+            JSONObject()
+                .put("email", current.email)
+                .put("displayName", current.displayName.ifBlank { "משתמש" })
+                .put("photoURL", photoDataUrl)
+        )
+        refreshAccountInternal(null).user ?: current
+    }
+
+    suspend fun changePassword(oldPassword: String, newPassword: String) = withContext(Dispatchers.IO) {
+        postJson(
+            "/auth/change-password",
+            JSONObject().put("oldPassword", oldPassword).put("newPassword", newPassword)
+        )
+        Unit
+    }
+
+    suspend fun sendAdminMessage(
+        description: String,
+        severity: String = "low",
+        location: String = "Android profile",
+        originalUserMessage: String = description
+    ) = withContext(Dispatchers.IO) {
+        val user = readCachedAccount().user
+        val payload = JSONObject()
+            .put("description", description.trim())
+            .put("severity", severity)
+            .put("location_context", location)
+            .put("original_user_message", originalUserMessage)
+            .put("category", if (severity == "low") "suggestion" else "bug")
+            .put("userEmail", user?.email ?: "Anonymous")
+            .put("userDisplayName", user?.displayName ?: "Anonymous")
+            .put("userId", user?.userId ?: "unknown")
+        val request = Request.Builder()
+            .url(BUG_REPORT_URL)
+            .header("Accept", "application/json")
+            .post(payload.toString().toRequestBody(jsonType))
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw ApiException("שליחת ההודעה נכשלה", response.code)
+        }
+    }
+
     private suspend fun finishLogin(generation: Long, loginBody: JSONObject): LoginResult {
         val loginUser = loginBody.toUser(apiBase)
         val loginData = loginBody.optJSONObject("data")
@@ -200,10 +263,17 @@ class StudyZoneApi(context: Context) {
         val sameCachedAccount = local.user?.sameIdentityAs(user) == true
         val snapshot = remote.copy(
             completedSections = if (sameCachedAccount) local.completedSections + remote.completedSections else remote.completedSections,
-            bookmarkedSections = if (sameCachedAccount) local.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections
+            bookmarkedSections = if (sameCachedAccount) local.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections,
+            pythiMemories = if (sameCachedAccount) local.pythiMemories + remote.pythiMemories else remote.pythiMemories
         )
         if (generation == authGeneration.get()) cacheAccount(snapshot)
-        return LoginResult(user, snapshot.completedSections, snapshot.bookmarkedSections, loadCourseAccess(user))
+        return LoginResult(
+            user,
+            snapshot.completedSections,
+            snapshot.bookmarkedSections,
+            snapshot.pythiMemories,
+            loadCourseAccess(user)
+        )
     }
 
     private fun loadCourseAccess(user: User?): CourseAccess {
@@ -343,6 +413,28 @@ class StudyZoneApi(context: Context) {
         )
     }
 
+    suspend fun syncPythiMemories(memories: Map<String, String>) = withContext(Dispatchers.IO) {
+        val normalized = memories.entries
+            .asSequence()
+            .map { it.key.trim().take(80) to it.value.trim().take(500) }
+            .filter { it.first.isNotBlank() && it.second.isNotBlank() }
+            .take(100)
+            .toMap()
+        val memoriesJson = JSONObject(normalized).toString()
+        postJson(
+            "/user/sync",
+            JSONObject().put(
+                "data",
+                JSONObject().put(
+                    "pythiMemories",
+                    JSONObject().put("memories", memoriesJson)
+                )
+            )
+        )
+        val cached = readCachedAccount()
+        if (cached.user != null) cacheAccount(cached.copy(pythiMemories = normalized))
+    }
+
     suspend fun loadAdmin(): AdminData = withContext(Dispatchers.IO) {
         coroutineScope {
             val overview = async { requestJson("/admin/overview") }
@@ -478,33 +570,97 @@ class StudyZoneApi(context: Context) {
 
     fun streamChat(
         messages: List<Pair<String, String>>,
+        attachments: List<ChatAttachment>,
         course: Course?,
         lesson: Lesson?,
+        user: User?,
+        pythiMemories: Map<String, String>,
+        completedSections: Set<String>,
+        bookmarkedSections: Set<String>,
+        showActionSuggestions: Boolean,
         onDelta: (String) -> Unit,
-        onDone: () -> Unit,
+        onDone: (List<ToolCall>) -> Unit,
         onError: (Throwable) -> Unit
     ): Call {
         val contents = JSONArray().apply {
-            messages
+            val visibleMessages = messages
                 .filter { it.second.isNotBlank() }
                 .takeLast(18)
-                .forEach { (rawRole, text) ->
+            visibleMessages.forEachIndexed { index, (rawRole, text) ->
                     val role = if (rawRole == "assistant") "model" else rawRole
-                    put(JSONObject().put("role", role).put("parts", JSONArray().put(JSONObject().put("text", text))))
+                    val parts = JSONArray().put(JSONObject().put("text", text))
+                    if (role == "user" && index == visibleMessages.lastIndex) {
+                        attachments.forEach { attachment ->
+                            parts.put(
+                                JSONObject().put(
+                                    "inlineData",
+                                    JSONObject()
+                                        .put("mimeType", attachment.mimeType)
+                                        .put("data", attachment.base64Data)
+                                )
+                            )
+                        }
+                    }
+                    put(JSONObject().put("role", role).put("parts", parts))
                 }
         }
         val payload = JSONObject()
             .put("contents", contents)
             .put("requestKind", "chat")
-            .put("showActionSuggestions", false)
+            .put("showActionSuggestions", showActionSuggestions)
             .put(
                 "serverPromptContext",
                 JSONObject()
                     .put("courseName", course?.title ?: "StudyZone")
                     .put("currentContext", lesson?.let { "${it.title} (${it.sectionId})" } ?: "מסך הקורסים")
-                    .put("courseStructure", course?.chapters?.joinToString("\n") { chapter ->
-                        "${chapter.title}: ${chapter.sections.joinToString { it.title }}"
-                    }.orEmpty())
+                    .put("languageInstruction", "כל השיחות והמענים של פיתי חייבים להיות בעברית בלבד. על פיתי להשיב תמיד בעברית בלבד בכל הודעה, תוך תמיכה מלאה בסימוני KaTeX למתמטיקה ולמושגים מדעיים.")
+                    .put(
+                        "userMemories",
+                        buildString {
+                            if (user != null) {
+                                appendLine("שם המשתמש: ${user.displayName}")
+                                appendLine("המשתמש מחובר לחשבון: ${user.email}")
+                            } else appendLine("המשתמש אינו מחובר.")
+                            if (pythiMemories.isNotEmpty()) {
+                                appendLine("זיכרונות שפיתי שמרה:")
+                                pythiMemories.entries.take(50).forEach { (key, value) -> appendLine("- $key: $value") }
+                            }
+                            appendLine("התקדמות: ${completedSections.size} שיעורים הושלמו, ${bookmarkedSections.size} פריטים נשמרו.")
+                        }.take(8_000)
+                    )
+                    .put(
+                        "savedItemsString",
+                        if (bookmarkedSections.isEmpty()) "התיבה ריקה כרגע."
+                        else bookmarkedSections.take(100).joinToString("\n") { "- $it" }
+                    )
+                    .put(
+                        "userProfile",
+                        JSONObject()
+                            .put("displayName", user?.displayName.orEmpty())
+                            .put("email", user?.email.orEmpty())
+                            .put("isSignedIn", user != null)
+                    )
+                    .put("pythiMemories", JSONObject(pythiMemories))
+                    .put(
+                        "learningProgress",
+                        JSONObject()
+                            .put("completedSections", JSONArray(completedSections.take(200)))
+                            .put("bookmarkedSections", JSONArray(bookmarkedSections.take(100)))
+                            .put("completedCount", completedSections.size)
+                            .put("bookmarkedCount", bookmarkedSections.size)
+                    )
+                    .put("courseStructure", JSONArray().apply {
+                        course?.chapters?.forEach { chapter ->
+                            put(JSONObject()
+                                .put("id", chapter.id)
+                                .put("title", chapter.title)
+                                .put("sections", JSONArray().apply {
+                                    chapter.sections.forEach { section ->
+                                        put(JSONObject().put("id", section.id).put("title", section.title))
+                                    }
+                                }))
+                        }
+                    })
             )
         if (lesson != null) {
             payload.put(
@@ -539,6 +695,7 @@ class StudyZoneApi(context: Context) {
                         val source = it.body?.source() ?: throw ApiException("השרת החזיר תשובה ריקה")
                         var fullText = ""
                         var receivedFinal = false
+                        var finalCalls: List<ToolCall> = emptyList()
                         while (!source.exhausted()) {
                             val rawLine = source.readUtf8Line() ?: break
                             val line = rawLine.trim().removePrefix("data:").trim()
@@ -558,6 +715,7 @@ class StudyZoneApi(context: Context) {
                                         fullText = finalText
                                         onDelta(fullText)
                                     }
+                                    finalCalls = event.optJSONArray("functionCalls").toToolCalls()
                                     receivedFinal = true
                                 }
                                 "error" -> throw ApiException(
@@ -566,11 +724,11 @@ class StudyZoneApi(context: Context) {
                                 )
                             }
                         }
-                        if (fullText.isBlank()) {
+                        if (fullText.isBlank() && finalCalls.isEmpty()) {
                             val suffix = if (receivedFinal) "" else " (החיבור נסגר לפני אירוע הסיום)"
                             throw ApiException("לא התקבלה תשובה מ־Pythi$suffix")
                         }
-                        if (terminal.compareAndSet(false, true)) onDone()
+                        if (terminal.compareAndSet(false, true)) onDone(finalCalls)
                     } catch (error: Throwable) {
                         if (terminal.compareAndSet(false, true)) onError(error)
                     }
@@ -616,7 +774,8 @@ class StudyZoneApi(context: Context) {
         val sameCachedAccount = cached.user?.sameIdentityAs(user) == true
         return remote.copy(
             completedSections = if (sameCachedAccount) cached.completedSections + remote.completedSections else remote.completedSections,
-            bookmarkedSections = if (sameCachedAccount) cached.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections
+            bookmarkedSections = if (sameCachedAccount) cached.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections,
+            pythiMemories = if (sameCachedAccount) cached.pythiMemories + remote.pythiMemories else remote.pythiMemories
         ).also { snapshot ->
             if (generation == authGeneration.get()) cacheAccount(snapshot)
         }
@@ -735,6 +894,7 @@ class StudyZoneApi(context: Context) {
             .put("user", snapshot.user.toJson())
             .put("completedSections", JSONArray(snapshot.completedSections.sorted()))
             .put("bookmarkedSections", JSONArray(snapshot.bookmarkedSections.sorted()))
+            .put("pythiMemories", JSONObject(snapshot.pythiMemories))
         accountCache.edit().putString(ACCOUNT_VALUE, payload.toString()).apply()
     }
 
@@ -750,7 +910,8 @@ class StudyZoneApi(context: Context) {
             AccountSnapshot(
                 user = user,
                 completedSections = payload.optJSONArray("completedSections").toStringSet(),
-                bookmarkedSections = payload.optJSONArray("bookmarkedSections").toStringSet()
+                bookmarkedSections = payload.optJSONArray("bookmarkedSections").toStringSet(),
+                pythiMemories = payload.optJSONObject("pythiMemories").toMemories()
             )
         }.getOrElse {
             clearCachedAccount()
@@ -769,6 +930,7 @@ class StudyZoneApi(context: Context) {
         private const val ACCOUNT_CACHE = "studyzone_account_cache_v2"
         private const val ACCOUNT_VALUE = "account"
         private const val MAX_AVATAR_BYTES = 5L * 1024L * 1024L
+        private const val BUG_REPORT_URL = "https://workflowbugreport.hillelben14.workers.dev/"
     }
 }
 
@@ -937,7 +1099,23 @@ private fun JSONObject?.toAccountSnapshot(user: User?): StudyZoneApi.AccountSnap
     val data = this
     val completed = data?.optJSONArray("completedSections").toStringSet()
     val bookmarks = data?.optJSONObject("pythiMemories")?.opt("bookmarks").toBookmarkKeys()
-    return StudyZoneApi.AccountSnapshot(user, completed, bookmarks)
+    val memories = data?.optJSONObject("pythiMemories")?.opt("memories").toMemories()
+    return StudyZoneApi.AccountSnapshot(user, completed, bookmarks, memories)
+}
+
+private fun Any?.toMemories(): Map<String, String> {
+    val source = when (this) {
+        is JSONObject -> this
+        is String -> runCatching { JSONObject(this) }.getOrNull()
+        else -> null
+    } ?: return emptyMap()
+    return buildMap {
+        source.keys().forEach { rawKey ->
+            val key = rawKey.trim().take(80)
+            val value = source.opt(rawKey)?.toString().orEmpty().trim().take(500)
+            if (key.isNotBlank() && value.isNotBlank()) put(key, value)
+        }
+    }
 }
 
 private fun Any?.toBookmarkKeys(): Set<String> {
@@ -974,6 +1152,22 @@ private fun JSONArray?.toSearchResults(): List<SearchResult> = buildList {
                 snippet = item.optString("snippet")
             )
         )
+    }
+}
+
+private fun JSONArray?.toToolCalls(): List<StudyZoneApi.ToolCall> = buildList {
+    val array = this@toToolCalls ?: return@buildList
+    for (index in 0 until array.length()) {
+        val item = array.optJSONObject(index) ?: continue
+        val name = item.optString("name").trim()
+        if (name.isBlank()) continue
+        val rawArguments = item.opt("args") ?: item.opt("arguments")
+        val arguments = when (rawArguments) {
+            is JSONObject -> rawArguments
+            is String -> runCatching { JSONObject(rawArguments) }.getOrDefault(JSONObject())
+            else -> JSONObject()
+        }
+        add(StudyZoneApi.ToolCall(name, arguments))
     }
 }
 

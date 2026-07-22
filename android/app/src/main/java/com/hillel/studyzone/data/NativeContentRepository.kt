@@ -46,14 +46,26 @@ internal class NativeContentRepository(
         val flattened = course.chapters.flatMap { chapter ->
             chapter.sections.map { section -> chapter to section }
         }
-        val selectedIndex = flattened.indexOfFirst { (_, section) -> section.id == sectionId }
-        if (selectedIndex < 0) return null
+        val cleanTarget = sectionId.trim()
+        var selectedIndex = flattened.indexOfFirst { (_, section) -> section.id.equals(cleanTarget, ignoreCase = true) }
+        if (selectedIndex < 0) {
+            val normTarget = cleanTarget.replace('.', '_')
+            selectedIndex = flattened.indexOfFirst { (_, section) -> section.id.replace('.', '_').equals(normTarget, ignoreCase = true) }
+        }
+        if (selectedIndex < 0) {
+            val prefixTarget = cleanTarget.substringBeforeLast('.', "")
+            if (prefixTarget.isNotBlank()) {
+                selectedIndex = flattened.indexOfFirst { (_, section) -> section.id.equals(prefixTarget, ignoreCase = true) }
+            }
+        }
+        if (selectedIndex < 0) {
+            if (flattened.isNotEmpty()) selectedIndex = 0 else return null
+        }
 
         val (chapter, section) = flattened[selectedIndex]
         val index = loadIndex(course.id)
         val raw = resolveLessonText(index?.optJSONObject(chapter.id), chapter.id, section.id)
         val normalized = normalizeLessonContent(raw.ifBlank { section.preview })
-        if (normalized.isBlank()) return null
 
         return Lesson(
             courseId = course.id,
@@ -61,7 +73,7 @@ internal class NativeContentRepository(
             chapterId = chapter.id,
             sectionId = section.id,
             title = section.title.ifBlank { "סעיף ${section.id}" },
-            content = normalized,
+            content = normalized.ifBlank { "תוכן השיעור ${section.title} נמצא בפיתוח." },
             interactiveUrl = "",
             previousSectionId = flattened.getOrNull(selectedIndex - 1)?.second?.id,
             nextSectionId = flattened.getOrNull(selectedIndex + 1)?.second?.id
@@ -175,19 +187,42 @@ internal class NativeContentRepository(
 
     private fun resolveLessonText(chapter: JSONObject?, chapterId: String, sectionId: String): String {
         if (chapter == null) return ""
-        chapter.opt(sectionId).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        val target = sectionId.trim()
+        chapter.opt(target).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
 
-        // Navigation metadata can describe nested sub-sections (for example
-        // 2.2.4) while the generated index stores their parent lesson (2.2).
-        var candidate = sectionId.substringBeforeLast('.', "")
+        val underscoreId = target.replace('.', '_')
+        chapter.opt(underscoreId).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        chapter.opt("Section$underscoreId").asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        chapter.opt("Prob_Section$underscoreId").asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        chapter.opt("Lecture$underscoreId").asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+
+        var candidate = target.substringBeforeLast('.', "")
         while (candidate.isNotBlank()) {
             chapter.opt(candidate).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+            val candUnderscore = candidate.replace('.', '_')
+            chapter.opt(candUnderscore).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+            chapter.opt("Section$candUnderscore").asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+            chapter.opt("Prob_Section$candUnderscore").asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
             candidate = candidate.substringBeforeLast('.', "")
         }
 
-        // Lecture-style courses store one source under the bare chapter id and
-        // expose several sidebar anchors that all belong to that lecture.
         chapter.opt(chapterId).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        chapter.opt("Lecture$chapterId").asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val keys = chapter.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key.contains(underscoreId) || key.contains(target)) {
+                chapter.opt(key).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+            }
+        }
+
+        val fallbackKeys = chapter.keys()
+        while (fallbackKeys.hasNext()) {
+            val key = fallbackKeys.next()
+            chapter.opt(key).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+
         return ""
     }
 
