@@ -657,6 +657,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setChatExpanded(expanded: Boolean) = mutableState.update { it.copy(chatExpanded = expanded, chatOpen = true) }
     fun setChatInput(input: String) = mutableState.update { it.copy(chatInput = input) }
+    fun clearChatReplyContext() = mutableState.update { it.copy(chatReplyContext = null) }
 
     fun addChatAttachments(uris: List<Uri>) {
         if (uris.isEmpty()) return
@@ -694,12 +695,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         val attachments = snapshot.chatAttachments
         val visibleText = text.ifBlank { "מצורפים ${attachments.size} קבצים" }
-        val userMessage = ChatMessage(role = "user", text = visibleText, attachments = attachments.map { it.copy(base64Data = "") })
+        val userMessage = ChatMessage(
+            role = "user",
+            text = visibleText,
+            replyTo = snapshot.chatReplyContext,
+            attachments = attachments.map { it.copy(base64Data = "") }
+        )
         val modelMessage = ChatMessage(role = "model", text = "", isStreaming = true)
         val messages = snapshot.chatMessages + userMessage + modelMessage
         mutableState.update {
             it.copy(
                 chatInput = "",
+                chatReplyContext = null,
                 chatAttachments = emptyList(),
                 chatSuggestions = emptyList(),
                 chatMessages = messages,
@@ -816,22 +823,59 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update {
             it.copy(
                 chatMessages = emptyList(),
+                chatReplyContext = null,
                 chatAttachments = emptyList(),
                 chatSuggestions = listOf("תסבירי לי בפשטות", "צרי לי בוחן", "הכיני לי כרטיסיות")
             )
         }
     }
 
-    fun askPythiAboutSelection(selectedText: String) {
+    fun askPythiAboutSelection(selectedText: String, question: String) {
         val excerpt = selectedText.trim().replace(Regex("\\s+"), " ").take(1_500)
-        if (excerpt.isBlank()) return
+        val prompt = question.trim().take(2_000)
+        if (excerpt.isBlank() || prompt.isBlank()) return
         mutableState.update {
             it.copy(
                 chatOpen = true,
                 chatExpanded = false,
-                chatInput = "הסבירי לי את הקטע הבא מהשיעור:\n״$excerpt״"
+                chatInput = prompt,
+                chatReplyContext = excerpt
             )
         }
+        sendChat()
+    }
+
+    fun editChatMessage(messageId: Long, text: String) {
+        stopChat()
+        mutableState.update { current ->
+            val index = current.chatMessages.indexOfFirst { it.id == messageId && it.role == "user" }
+            if (index < 0) current else current.copy(
+                chatOpen = true,
+                chatMessages = current.chatMessages.take(index),
+                chatInput = text,
+                chatReplyContext = current.chatMessages[index].replyTo,
+                chatSuggestions = emptyList()
+            )
+        }
+    }
+
+    fun retryChatMessage(messageId: Long) {
+        stopChat()
+        val current = mutableState.value
+        val modelIndex = current.chatMessages.indexOfFirst { it.id == messageId && it.role == "model" }
+        if (modelIndex < 0) return
+        val userIndex = (modelIndex - 1 downTo 0).firstOrNull { current.chatMessages[it].role == "user" } ?: return
+        val userMessage = current.chatMessages[userIndex]
+        mutableState.update {
+            it.copy(
+                chatOpen = true,
+                chatMessages = it.chatMessages.take(userIndex),
+                chatInput = userMessage.text,
+                chatReplyContext = userMessage.replyTo,
+                chatSuggestions = emptyList()
+            )
+        }
+        sendChat()
     }
 
     fun openAdmin() {
@@ -1408,6 +1452,11 @@ private fun JSONArray?.toStringValues(limit: Int): List<String> = buildList {
 }
 
 private fun ChatMessage.toChatHistoryText(): String = buildString {
+    replyTo?.takeIf(String::isNotBlank)?.let { quoted ->
+        append("[בתגובה לקטע מהשיעור: ")
+        append(quoted)
+        append("]\n")
+    }
     append(text)
     quiz?.let { quiz ->
         append("\n\n[בוחן שנוצר בשיחה: ${quiz.title}]")

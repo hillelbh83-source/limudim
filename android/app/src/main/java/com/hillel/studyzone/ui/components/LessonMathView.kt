@@ -1,6 +1,9 @@
 package com.hillel.studyzone.ui.components
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color as AndroidColor
@@ -46,7 +49,7 @@ fun LessonMathView(
     selectionEnabled: Boolean = true,
     clearSelectionAfterAction: Boolean = false,
     selectionHighlight: String = "default",
-    onAskSelection: (String) -> Unit = {},
+    onAskSelection: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -96,6 +99,8 @@ fun LessonMathView(
 fun ChatRichText(
     messages: List<ChatMessage>,
     onTap: () -> Unit = {},
+    onEditMessage: (Long, String) -> Unit = { _, _ -> },
+    onRetryMessage: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (messages.isEmpty()) return
@@ -114,8 +119,10 @@ fun ChatRichText(
             messages.forEach { message ->
                 val item = JSONObject()
                     .put("id", message.id.toString())
+                    .put("createdAt", message.createdAt)
                     .put("role", message.role)
                     .put("text", message.text)
+                    .put("replyTo", message.replyTo.orEmpty())
                     .put("streaming", message.isStreaming)
                     .put("error", message.isError)
                     .put("attachments", JSONArray().apply {
@@ -174,6 +181,7 @@ fun ChatRichText(
             LocalRendererWebView(context).apply {
                 configureLocalRenderer(palette.background)
                 contentDescription = "שיחת Pythi"
+                addJavascriptInterface(ChatActionBridge(context, onEditMessage, onRetryMessage), "AndroidChat")
                 webViewClient = rendererClient()
                 loadDataWithBaseURL(LOCAL_BASE_URL, shell, "text/html", "UTF-8", null)
             }
@@ -190,7 +198,10 @@ fun ChatRichText(
             }
         )
         DisposableEffect(webView) {
-            onDispose { webView.disposeSafely() }
+            onDispose {
+                webView.removeJavascriptInterface("AndroidChat")
+                webView.disposeSafely()
+            }
         }
     }
 }
@@ -373,9 +384,19 @@ private fun lessonShell(
         .katex-mathml { position:absolute; }
         .math-error { direction:ltr; color:${palette.error}; font-family:ui-monospace,monospace; }
         ::selection { background:$selectionColor; }
-        #selection-popover { position:fixed; z-index:9999; display:none; direction:rtl; transform:translate(-50%,-100%);
-          appearance:none; border:1px solid #ffffff30; border-radius:999px; padding:10px 15px; color:white;
-          background:#111827ee; box-shadow:0 12px 32px #00000045; font:700 13px/1 -apple-system,"Segoe UI",Arial,sans-serif; }
+        #selection-popover { position:fixed; z-index:9999; display:none; direction:ltr; transform:translate(-50%,-100%);
+          width:min(344px,calc(100vw - 24px)); min-height:54px; align-items:center; gap:7px; padding:7px;
+          border:1px solid color-mix(in srgb,var(--outline) 72%,transparent); border-radius:27px;
+          background:color-mix(in srgb,var(--surface) 84%,transparent); color:var(--fg);
+          box-shadow:0 18px 48px #00000038,inset 0 1px 0 #ffffff28;
+          -webkit-backdrop-filter:blur(24px) saturate(160%); backdrop-filter:blur(24px) saturate(160%); }
+        #selection-question { direction:rtl; text-align:right; min-width:0; flex:1; height:40px; padding:0 10px;
+          border:0; outline:0; background:transparent; color:var(--fg); caret-color:var(--blue);
+          font:500 15px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+        #selection-question::placeholder { color:var(--muted); opacity:.9; }
+        #selection-send { appearance:none; flex:none; width:40px; height:40px; display:grid; place-items:center;
+          border:0; border-radius:50%; background:var(--blue); color:white; font:800 22px/1 Arial,sans-serif;
+          box-shadow:0 6px 16px #1473ff55; }
       </style>
       <script>$katexSource</script>
       <script>${sharedRendererScript()}
@@ -385,7 +406,13 @@ private fun lessonShell(
         document.addEventListener('DOMContentLoaded', function() {
           const popover = document.getElementById('selection-popover');
           let selectedText = '';
-          function updateSelectionPopover() {
+          function rememberSelection() {
+            const selection = window.getSelection();
+            const text = selection ? selection.toString().trim() : '';
+            if (text && selection.rangeCount) selectedText = text;
+          }
+          function updateSelectionPopover(event) {
+            if (event && popover.contains(event.target)) return;
             if (!${selectionEnabled}) { popover.style.display = 'none'; return; }
             window.setTimeout(function() {
               const selection = window.getSelection();
@@ -393,30 +420,86 @@ private fun lessonShell(
               if (!text || !selection.rangeCount) { popover.style.display = 'none'; return; }
               const rect = selection.getRangeAt(0).getBoundingClientRect();
               selectedText = text;
-              popover.style.left = Math.max(72, Math.min(window.innerWidth - 72, rect.left + rect.width / 2)) + 'px';
-              popover.style.top = Math.max(54, rect.top - 8) + 'px';
-              popover.style.display = 'block';
-            }, 110);
+              const half = Math.min(172, Math.max(120, (window.innerWidth - 24) / 2));
+              popover.style.left = Math.max(half + 12, Math.min(window.innerWidth - half - 12, rect.left + rect.width / 2)) + 'px';
+              popover.style.top = Math.max(68, rect.top - 10) + 'px';
+              popover.style.display = 'flex';
+            }, 70);
           }
-          document.addEventListener('touchstart', function() { popover.style.display = 'none'; });
-          document.addEventListener('touchend', updateSelectionPopover);
-          document.addEventListener('mouseup', updateSelectionPopover);
-          popover.addEventListener('click', function() {
-            if (selectedText && window.AndroidSelection) AndroidSelection.ask(selectedText);
+          function sendSelectionQuestion() {
+            const input = document.getElementById('selection-question');
+            const question = input.value.trim();
+            if (!selectedText || !question) return;
+            if (window.AndroidSelection) window.AndroidSelection.ask(selectedText, question);
+            input.value = '';
             popover.style.display = 'none';
             if (${clearSelectionAfterAction}) window.getSelection().removeAllRanges();
+          }
+          document.addEventListener('selectionchange', rememberSelection, true);
+          document.addEventListener('touchstart', function(event) {
+            if (!popover.contains(event.target)) popover.style.display = 'none';
+          }, true);
+          window.addEventListener('touchend', updateSelectionPopover, true);
+          window.addEventListener('mouseup', updateSelectionPopover, true);
+          document.getElementById('selection-send').addEventListener('click', sendSelectionQuestion);
+          document.getElementById('selection-question').addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') { event.preventDefault(); sendSelectionQuestion(); }
           });
         });
       </script>
     </head>
-    <body><button id="selection-popover" type="button">שאלו את פיתי ✨</button><article id="lesson" aria-live="polite"></article></body>
+    <body><div id="selection-popover" role="dialog" aria-label="שאלו את פיתי על הטקסט המסומן">
+      <button id="selection-send" type="button" aria-label="שליחה">↑</button>
+      <input id="selection-question" type="text" inputmode="text" enterkeyhint="send" placeholder="שאלו את פיתי על הקטע…" />
+    </div><article id="lesson" aria-live="polite"></article></body>
     </html>
 """.trimIndent()
 
-private class SelectionBridge(private val onAsk: (String) -> Unit) {
+private class SelectionBridge(private val onAsk: (String, String) -> Unit) {
     @JavascriptInterface
-    fun ask(text: String) {
-        Handler(Looper.getMainLooper()).post { onAsk(text) }
+    fun ask(text: String, question: String) {
+        Handler(Looper.getMainLooper()).post { onAsk(text, question) }
+    }
+}
+
+private class ChatActionBridge(
+    private val context: Context,
+    private val onEditMessage: (Long, String) -> Unit,
+    private val onRetryMessage: (Long) -> Unit
+) {
+    @JavascriptInterface
+    fun copy(text: String) {
+        Handler(Looper.getMainLooper()).post {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Pythi", text))
+        }
+    }
+
+    @JavascriptInterface
+    fun share(text: String) {
+        Handler(Looper.getMainLooper()).post {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            val chooser = Intent.createChooser(send, "שיתוף התשובה של פיתי")
+            if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        }
+    }
+
+    @JavascriptInterface
+    fun edit(id: String, text: String) {
+        id.toLongOrNull()?.let { messageId ->
+            Handler(Looper.getMainLooper()).post { onEditMessage(messageId, text) }
+        }
+    }
+
+    @JavascriptInterface
+    fun retry(id: String) {
+        id.toLongOrNull()?.let { messageId ->
+            Handler(Looper.getMainLooper()).post { onRetryMessage(messageId) }
+        }
     }
 }
 
@@ -450,8 +533,12 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         #messages { display:flex; flex-direction:column; gap:10px; }
         .message { width:fit-content; max-width:86%; padding:11px 18px; border-radius:24px;
                    overflow-wrap:anywhere; border:1px solid transparent; }
-        .message.user { align-self:flex-end; color:white; background:var(--blue); box-shadow:0 6px 18px #1473ff25; }
-        .message.model { align-self:flex-start; width:100%; max-width:100%; padding:9px 4px; background:transparent; border:0; }
+        .message.user { align-self:flex-end; color:var(--fg);
+                        background:color-mix(in srgb,var(--surface) 82%,var(--fg) 18%);
+                        box-shadow:0 6px 18px #00000018;
+                        -webkit-user-select:none; user-select:none; }
+        .message.model { align-self:flex-start; width:100%; max-width:100%; padding:9px 4px; background:transparent; border:0;
+                         direction:rtl; text-align:right; }
         .message.error { color:var(--error); border-color:color-mix(in srgb,var(--error) 35%,transparent); }
         .message p { margin:.45em 0; } .message p:first-child { margin-top:0; } .message p:last-child { margin-bottom:0; }
         .message ul { margin:.5em 0; padding-inline-start:1.2em; }
@@ -466,7 +553,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .katex-mathml { position:absolute; }
         code { direction:ltr; unicode-bidi:isolate; font-family:ui-monospace,monospace; background:#00000016;
                padding:.12em .3em; border-radius:6px; }
-        .typing { display:inline-flex; direction:ltr; gap:4px; padding:4px; }
+        .typing { display:flex; width:max-content; margin-left:auto; margin-right:0; direction:ltr; gap:4px; padding:4px; }
         .typing i { width:6px; height:6px; border-radius:50%; background:var(--muted); animation:pulse 1s infinite; }
         .typing i:nth-child(2) { animation-delay:.12s; } .typing i:nth-child(3) { animation-delay:.24s; }
         .cursor { display:inline-block; width:2px; height:1.05em; margin-inline-start:3px; vertical-align:-.14em;
@@ -474,6 +561,27 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .attachment-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
         .attachment { max-width:190px; padding:5px 9px; border-radius:999px; background:#ffffff22;
                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.78em; }
+        .reply-quote { margin:0 0 8px; padding:8px 10px; border-radius:13px; border-right:3px solid var(--blue);
+                       background:color-mix(in srgb,var(--surface) 72%,transparent); color:inherit; opacity:.92;
+                       font-size:.82em; line-height:1.4;
+                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .message-actions { width:100%; display:flex; direction:ltr; justify-content:flex-start; gap:3px; margin-top:7px; }
+        .message-action { appearance:none; width:34px; height:34px; display:grid; place-items:center; padding:0;
+                          border:0; border-radius:11px; background:transparent; color:var(--muted);
+                          font:600 21px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+        .message-action:active { background:color-mix(in srgb,var(--surface) 82%,transparent); color:var(--fg); }
+        #message-menu-backdrop { position:fixed; inset:0; z-index:9997; background:transparent; }
+        #message-menu { position:fixed; z-index:9998; width:236px; overflow:hidden; direction:rtl;
+                        border:1px solid color-mix(in srgb,var(--outline) 74%,transparent); border-radius:25px;
+                        background:color-mix(in srgb,var(--surface) 91%,transparent); color:var(--fg);
+                        box-shadow:0 22px 60px #00000052,inset 0 1px 0 #ffffff22;
+                        -webkit-backdrop-filter:blur(28px) saturate(160%); backdrop-filter:blur(28px) saturate(160%); }
+        .menu-time { padding:16px 18px 9px; color:var(--muted); font-size:.78em; direction:rtl; }
+        .menu-item { appearance:none; width:100%; min-height:54px; display:flex; align-items:center; gap:14px;
+                     padding:9px 18px; border:0; background:transparent; color:var(--fg); text-align:right;
+                     font:650 16px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+        .menu-item:active { background:color-mix(in srgb,var(--fg) 9%,transparent); }
+        .menu-icon { width:27px; flex:none; text-align:center; font-size:22px; font-weight:400; }
         .tool-card { width:100%; margin:12px 0 4px; overflow:hidden; border:1px solid var(--outline);
                      border-radius:20px; background:var(--surface); color:var(--fg);
                      box-shadow:0 10px 28px -24px #0f172a99; }
@@ -698,6 +806,83 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           });
         }
 
+        function chatBridge(method) {
+          const args = Array.prototype.slice.call(arguments, 1);
+          if (!window.AndroidChat) return;
+          if (method === 'copy') window.AndroidChat.copy(String(args[0] || ''));
+          else if (method === 'share') window.AndroidChat.share(String(args[0] || ''));
+          else if (method === 'edit') window.AndroidChat.edit(String(args[0] || ''), String(args[1] || ''));
+          else if (method === 'retry') window.AndroidChat.retry(String(args[0] || ''));
+        }
+
+        function actionButton(symbol, label, action) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = 'message-action'; button.textContent = symbol;
+          button.setAttribute('aria-label', label); button.title = label;
+          button.addEventListener('click', function(event) { event.stopPropagation(); action(); });
+          return button;
+        }
+
+        function closeMessageMenu() {
+          const menu = document.getElementById('message-menu');
+          const backdrop = document.getElementById('message-menu-backdrop');
+          if (menu) menu.remove();
+          if (backdrop) backdrop.remove();
+        }
+
+        function showUserMessageMenu(bubble, message, clientX, clientY) {
+          closeMessageMenu();
+          const backdrop = document.createElement('div');
+          backdrop.id = 'message-menu-backdrop';
+          backdrop.addEventListener('click', closeMessageMenu);
+          const menu = document.createElement('section');
+          menu.id = 'message-menu'; menu.setAttribute('role', 'menu');
+          const when = new Date(Number(message.createdAt) || Date.now()).toLocaleString('he-IL', {
+            day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'
+          });
+          const time = document.createElement('div'); time.className = 'menu-time'; time.textContent = when;
+          menu.appendChild(time);
+          function item(icon, label, action) {
+            const button = document.createElement('button');
+            button.type = 'button'; button.className = 'menu-item';
+            button.innerHTML = '<span class="menu-icon">' + icon + '</span><span>' + label + '</span>';
+            button.addEventListener('click', function(event) { event.stopPropagation(); closeMessageMenu(); action(); });
+            menu.appendChild(button);
+          }
+          item('⧉', 'העתקה', function() { chatBridge('copy', message.text || ''); });
+          item('▤', 'בחירת טקסט', function() {
+            const content = bubble.querySelector('.message-content');
+            if (!content) return;
+            bubble.style.webkitUserSelect = 'text'; bubble.style.userSelect = 'text';
+            const range = document.createRange(); range.selectNodeContents(content);
+            const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+          });
+          item('✎', 'עריכת ההודעה', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
+          document.body.appendChild(backdrop); document.body.appendChild(menu);
+          const width = 236, height = 222;
+          menu.style.left = Math.max(10, Math.min(window.innerWidth - width - 10, clientX - width / 2)) + 'px';
+          menu.style.top = Math.max(10, Math.min(window.innerHeight - height - 10, clientY - height / 2)) + 'px';
+        }
+
+        function installUserLongPress(bubble, message) {
+          let timer = 0, startX = 0, startY = 0;
+          function cancel() { if (timer) window.clearTimeout(timer); timer = 0; }
+          bubble.addEventListener('touchstart', function(event) {
+            const point = event.touches[0]; if (!point) return;
+            startX = point.clientX; startY = point.clientY; cancel();
+            timer = window.setTimeout(function() { timer = 0; showUserMessageMenu(bubble, message, startX, startY); }, 480);
+          }, {passive:true});
+          bubble.addEventListener('touchmove', function(event) {
+            const point = event.touches[0];
+            if (point && (Math.abs(point.clientX - startX) > 9 || Math.abs(point.clientY - startY) > 9)) cancel();
+          }, {passive:true});
+          bubble.addEventListener('touchend', cancel, {passive:true});
+          bubble.addEventListener('touchcancel', cancel, {passive:true});
+          bubble.addEventListener('contextmenu', function(event) {
+            event.preventDefault(); cancel(); showUserMessageMenu(bubble, message, event.clientX, event.clientY);
+          });
+        }
+
         let pendingMessages = null;
         let messageFrame = 0;
         window.renderMessages = function(messages) {
@@ -712,11 +897,17 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             const bubble = document.createElement('section');
             bubble.className = 'message ' + (message.role === 'user' ? 'user' : 'model') + (message.error ? ' error' : '');
             bubble.setAttribute('dir', 'auto');
-            if (!message.text && message.streaming) {
-              bubble.innerHTML = '<span class="typing" aria-label="Pythi חושבת"><i></i><i></i><i></i></span>';
-            } else {
-              bubble.innerHTML = renderMarkdown(message.text || '') + (message.streaming ? '<span class="cursor"></span>' : '');
+            if (message.replyTo) {
+              const reply = document.createElement('div'); reply.className = 'reply-quote'; reply.textContent = message.replyTo;
+              bubble.appendChild(reply);
             }
+            const content = document.createElement('div'); content.className = 'message-content';
+            if (!message.text && message.streaming) {
+              content.innerHTML = '<span class="typing" aria-label="Pythi חושבת"><i></i><i></i><i></i></span>';
+            } else {
+              content.innerHTML = renderMarkdown(message.text || '') + (message.streaming ? '<span class="cursor"></span>' : '');
+            }
+            bubble.appendChild(content);
             if (Array.isArray(message.attachments) && message.attachments.length) {
               const attachments = document.createElement('div'); attachments.className = 'attachment-row';
               message.attachments.forEach(function(name) {
@@ -727,6 +918,14 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             if (message.quiz) renderQuiz(bubble, message.quiz, message.id || String(Math.random()));
             if (message.flashcards) renderFlashcards(bubble, message.flashcards, message.id || String(Math.random()));
             if (message.plot) renderPlot(bubble, message.plot);
+            if (!message.streaming && message.role === 'model') {
+              const actions = document.createElement('div'); actions.className = 'message-actions';
+              actions.appendChild(actionButton('⧉', 'העתקת התשובה', function() { chatBridge('copy', message.text || ''); }));
+              actions.appendChild(actionButton('↻', 'ניסיון נוסף', function() { chatBridge('retry', String(message.id || '')); }));
+              actions.appendChild(actionButton('↗', 'שיתוף התשובה', function() { chatBridge('share', message.text || ''); }));
+              bubble.appendChild(actions);
+            }
+            if (message.role === 'user') installUserLongPress(bubble, message);
             root.appendChild(bubble);
           });
           requestAnimationFrame(function() { window.scrollTo(0, document.body.scrollHeight); });

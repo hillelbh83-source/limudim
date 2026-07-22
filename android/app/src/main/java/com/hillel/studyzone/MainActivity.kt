@@ -412,6 +412,9 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onSend = viewModel::sendChat,
                 onStop = viewModel::stopChat,
                 onClear = viewModel::clearChat,
+                onClearReply = viewModel::clearChatReplyContext,
+                onEditMessage = viewModel::editChatMessage,
+                onRetryMessage = viewModel::retryChatMessage,
                 modifier = Modifier.fillMaxSize()
             )
         }

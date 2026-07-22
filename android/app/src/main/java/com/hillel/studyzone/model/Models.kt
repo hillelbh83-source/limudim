@@ -58,8 +58,10 @@ data class User(
 
 data class ChatMessage(
     val id: Long = System.nanoTime(),
+    val createdAt: Long = System.currentTimeMillis(),
     val role: String,
     val text: String,
+    val replyTo: String? = null,
     val isStreaming: Boolean = false,
     val isError: Boolean = false,
     val attachments: List<ChatAttachment> = emptyList(),
@@ -247,6 +249,7 @@ data class UiState(
     val chatOpen: Boolean = false,
     val chatExpanded: Boolean = false,
     val chatInput: String = "",
+    val chatReplyContext: String? = null,
     val chatAttachments: List<ChatAttachment> = emptyList(),
     val chatMessages: List<ChatMessage> = emptyList(),
     val chatStreaming: Boolean = false,

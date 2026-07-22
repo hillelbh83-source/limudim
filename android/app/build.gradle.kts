@@ -20,8 +20,8 @@ android {
         applicationId = "com.hillel.studyzone"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "2.8.1"
+        versionCode = 14
+        versionName = "2.9.0"
 
         buildConfigField(
             "String",

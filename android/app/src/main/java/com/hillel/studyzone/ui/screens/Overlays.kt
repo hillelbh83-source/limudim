@@ -3,7 +3,15 @@ package com.hillel.studyzone.ui.screens
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
+import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -102,6 +110,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -112,6 +121,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.layout.ContentScale
@@ -124,20 +134,13 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.TextRange
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material.icons.rounded.School
 import com.hillel.studyzone.model.AccessRequest
 import com.hillel.studyzone.model.AdminUser
@@ -406,7 +409,7 @@ fun LessonScreen(
     onCompleted: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onAskSelection: (String) -> Unit
+    onAskSelection: (String, String) -> Unit
 ) {
     val lesson = state.lesson
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -545,9 +548,11 @@ fun ChatOverlay(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onClear: () -> Unit,
+    onClearReply: () -> Unit,
+    onEditMessage: (Long, String) -> Unit,
+    onRetryMessage: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val dismissKeyboard = remember(keyboard, focusManager) {
@@ -578,7 +583,14 @@ fun ChatOverlay(
       AnimatedVisibility(
         visible = !state.chatOpen,
         modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding()
-            .padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp),
+            .padding(
+                end = 18.dp,
+                bottom = when {
+                    state.lesson != null -> 70.dp
+                    state.selectedCourse != null -> 30.dp
+                    else -> 100.dp
+                }
+            ),
         enter = fadeIn() + scaleIn(initialScale = .82f),
         exit = fadeOut() + scaleOut(targetScale = .82f)
       ) {
@@ -719,6 +731,8 @@ fun ChatOverlay(
                 ChatRichText(
                     messages = state.chatMessages,
                     onTap = dismissKeyboard,
+                    onEditMessage = onEditMessage,
+                    onRetryMessage = onRetryMessage,
                     modifier = Modifier.fillMaxWidth().weight(1f)
                 )
             }
@@ -761,14 +775,15 @@ fun ChatOverlay(
 
             PythiComposer(
                 input = state.chatInput,
+                replyContext = state.chatReplyContext,
                 streaming = state.chatStreaming,
                 hasAttachments = state.chatAttachments.isNotEmpty(),
-                focusRequester = focusRequester,
                 onInput = onInput,
                 onAttach = onAttach,
                 onVoice = onVoice,
                 onSend = onSend,
                 onStop = onStop,
+                onClearReply = onClearReply,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
             )
           }
@@ -780,72 +795,26 @@ fun ChatOverlay(
 @Composable
 private fun PythiComposer(
     input: String,
+    replyContext: String?,
     streaming: Boolean,
     hasAttachments: Boolean,
-    focusRequester: FocusRequester,
     onInput: (String) -> Unit,
     onAttach: () -> Unit,
     onVoice: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onClearReply: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val expanded = input.isNotBlank() || hasAttachments
     val shape = RoundedCornerShape(30.dp)
     val composerColor = MaterialTheme.colorScheme.surfaceVariant
     val contentColor = MaterialTheme.colorScheme.onSurface
     val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val rtlAnchor = "\u200F"
-    var fieldValue by remember { mutableStateOf(TextFieldValue(input, selection = TextRange(input.length))) }
-    LaunchedEffect(input) {
-        if (input != fieldValue.text) {
-            fieldValue = TextFieldValue(input, selection = TextRange(input.length))
-        }
-    }
-
-    val field: @Composable (Modifier) -> Unit = { fieldModifier ->
-        val displayedValue = if (fieldValue.text.isEmpty()) {
-            TextFieldValue(rtlAnchor, selection = TextRange(1))
-        } else fieldValue
-        androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            androidx.compose.foundation.text.BasicTextField(
-                value = displayedValue,
-                onValueChange = { updated ->
-                    val anchored = updated.text.startsWith(rtlAnchor)
-                    val cleanText = updated.text.replace(rtlAnchor, "")
-                    val selectionShift = if (anchored) 1 else 0
-                    val start = (updated.selection.start - selectionShift).coerceIn(0, cleanText.length)
-                    val end = (updated.selection.end - selectionShift).coerceIn(0, cleanText.length)
-                    fieldValue = TextFieldValue(cleanText, selection = TextRange(start, end))
-                    if (cleanText != input) onInput(cleanText)
-                },
-                modifier = fieldModifier.fillMaxWidth().focusRequester(focusRequester),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = contentColor,
-                    textAlign = TextAlign.Right,
-                    textDirection = TextDirection.Rtl
-                ),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(StudyBlue),
-                minLines = 1,
-                maxLines = 5,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (!streaming && (input.isNotBlank() || hasAttachments)) onSend() }),
-                decorationBox = { inner ->
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        if (input.isBlank()) {
-                            Text(
-                                "שאלו את פיתי",
-                                modifier = Modifier.fillMaxWidth(),
-                                color = placeholderColor,
-                                textAlign = TextAlign.Right
-                            )
-                        }
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { inner() }
-                    }
-                }
-            )
-        }
-    }
+    val latestInput by rememberUpdatedState(input)
+    val latestStreaming by rememberUpdatedState(streaming)
+    val latestHasAttachments by rememberUpdatedState(hasAttachments)
+    val latestOnInput by rememberUpdatedState(onInput)
+    val latestOnSend by rememberUpdatedState(onSend)
     androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Column(
             modifier
@@ -854,33 +823,89 @@ private fun PythiComposer(
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .7f), shape)
                 .padding(horizontal = 8.dp, vertical = 7.dp)
         ) {
-            // Keep the same BasicTextField instance in the composition while the composer grows.
-            // Recreating it after the first character used to drop focus and dismiss typing.
-            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!expanded) {
-                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", onVoice, contentColor)
-                }
-                field(
-                    Modifier.weight(1f)
-                        .heightIn(min = if (expanded) 48.dp else 44.dp, max = 122.dp)
-                        .padding(horizontal = if (expanded) 8.dp else 6.dp, vertical = if (expanded) 6.dp else 0.dp)
-                )
-                if (!expanded) {
-                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
+            replyContext?.takeIf(String::isNotBlank)?.let { quoted ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = .72f))
+                        .border(1.dp, StudyBlue.copy(alpha = .35f), RoundedCornerShape(15.dp))
+                        .padding(start = 10.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.width(3.dp).height(30.dp).clip(CircleShape).background(StudyBlue))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("בתגובה לקטע שסומן", color = StudyBlue, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Text(quoted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                    }
+                    IconButton(onClick = onClearReply, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Rounded.Close, "ביטול תגובה", modifier = Modifier.size(17.dp))
+                    }
                 }
             }
-            if (expanded) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    ComposerIcon(
-                        if (streaming) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
-                        if (streaming) "עצירת התשובה" else "שליחה",
-                        if (streaming) onStop else onSend,
-                        Color.White,
-                        background = if (streaming) MaterialTheme.colorScheme.error else StudyBlue
-                    )
-                    Spacer(Modifier.weight(1f))
-                    ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
+            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (streaming) {
+                    ComposerIcon(Icons.Rounded.Stop, "עצירת התשובה", onStop, Color.White, background = MaterialTheme.colorScheme.error)
+                } else if (input.isNotBlank() || hasAttachments) {
+                    ComposerIcon(Icons.Rounded.ArrowUpward, "שליחה", onSend, Color.White, background = StudyBlue)
+                } else {
+                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", onVoice, contentColor)
                 }
+                AndroidView(
+                    factory = { context ->
+                        EditText(context).apply {
+                            background = null
+                            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+                            textDirection = View.TEXT_DIRECTION_RTL
+                            layoutDirection = View.LAYOUT_DIRECTION_RTL
+                            textAlignment = View.TEXT_ALIGNMENT_GRAVITY
+                            setHorizontallyScrolling(false)
+                            setSingleLine(false)
+                            minLines = 1
+                            maxLines = 5
+                            includeFontPadding = false
+                            setPadding(0, 0, 0, 0)
+                            hint = "שאלו את פיתי"
+                            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                            addTextChangedListener(object : TextWatcher {
+                                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                                override fun afterTextChanged(editable: Editable?) {
+                                    val value = editable?.toString().orEmpty()
+                                    if (value != latestInput) latestOnInput(value)
+                                }
+                            })
+                            setOnEditorActionListener { _, actionId, _ ->
+                                if (actionId == EditorInfo.IME_ACTION_SEND && !latestStreaming &&
+                                    (text.isNotBlank() || latestHasAttachments)
+                                ) {
+                                    latestOnSend()
+                                    true
+                                } else false
+                            }
+                        }
+                    },
+                    update = { editText ->
+                        editText.setTextColor(contentColor.toArgb())
+                        editText.setHintTextColor(placeholderColor.toArgb())
+                        editText.textSize = 17f
+                        if (editText.text.toString() != input) {
+                            editText.setText(input)
+                            editText.setSelection(input.length)
+                            if (input.isNotBlank()) {
+                                editText.post {
+                                    editText.requestFocus()
+                                    (editText.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                                        ?.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 122.dp)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                )
+                ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
             }
         }
     }
