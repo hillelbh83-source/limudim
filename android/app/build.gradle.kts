@@ -29,10 +29,6 @@ android {
         buildConfig = true
     }
 
-    sourceSets.getByName("main") {
-        java.include("com/hillel/studyzone/MainActivity.kt")
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
