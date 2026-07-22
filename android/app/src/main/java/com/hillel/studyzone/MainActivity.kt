@@ -77,6 +77,8 @@ import com.hillel.studyzone.ui.screens.SearchScreen
 import com.hillel.studyzone.ui.screens.SettingsScreen
 import com.hillel.studyzone.ui.components.LocalHapticsEnabled
 import com.hillel.studyzone.ui.theme.StudyZoneTheme
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -312,82 +314,85 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
         }
     }
 
+    val bottomNavBackdrop = rememberLayerBackdrop()
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        when {
-            state.error != null && state.courses.isEmpty() -> ErrorState(state.error.orEmpty(), viewModel::bootstrap)
-            state.lesson != null || state.lessonLoading -> LessonScreen(
-                state = state,
-                onBack = viewModel::closeLesson,
-                onBookmark = viewModel::toggleBookmark,
-                onCompleted = viewModel::toggleCompleted,
-                onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
-                onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) },
-                onAskSelection = viewModel::askPythiAboutSelection
-            )
-            selectedCourse != null -> CourseDetailScreen(
-                state = state,
-                onBack = viewModel::closeCourse,
-                onLesson = { sectionId -> viewModel.openLesson(selectedCourse.id, sectionId) },
-                onRequestAccess = { viewModel.requestCourseAccess(selectedCourse.id) }
-            )
-            else -> AnimatedContent(targetState = state.rootTab, label = "rootTab") { tab ->
-                when (tab) {
-                    RootTab.COURSES -> CoursesScreen(
-                        state,
-                        onCourse = viewModel::openCourse,
-                        onProfile = { viewModel.selectTab(RootTab.PROFILE) },
-                        darkMode = resolvedDark,
-                        onThemeToggle = { origin ->
-                            themeRevealOrigin = origin
-                            // SYSTEM means the current phone palette, so the first tap must always
-                            // create a visible change instead of merely replacing SYSTEM with DARK.
-                            viewModel.setTheme(if (resolvedDark) ThemeMode.LIGHT else ThemeMode.DARK)
-                        }
-                    )
-                    RootTab.SEARCH -> SearchScreen(state, viewModel::setSearchQuery, viewModel::openLesson)
-                    RootTab.PROFILE -> ProfileScreen(
-                        state,
-                        onAuth = { viewModel.setAuthOpen(true) },
-                        onLogout = viewModel::logout,
-                        onAdmin = viewModel::openAdmin,
-                        onSaveMemory = viewModel::savePythiMemory,
-                        onRemoveMemory = viewModel::removePythiMemory,
-                        onUpdateName = viewModel::updateProfileName,
-                        onUpdatePhoto = { (context as? MainActivity)?.launchProfilePhotoPicker() },
-                        onSendAdminMessage = viewModel::sendAdminMessage,
-                        onChangePassword = viewModel::changePassword
-                    )
-                    RootTab.SETTINGS -> SettingsScreen(
-                        state = state,
-                        onTheme = { mode, origin ->
-                            themeRevealOrigin = origin
-                            viewModel.setTheme(mode)
-                        },
-                        onReduceMotion = viewModel::setReduceMotion,
-                        onHaptics = viewModel::setHaptics,
-                        onFontScale = viewModel::setFontScale,
-                        onKeepScreenOn = viewModel::setKeepScreenOn,
-                        onPersistChatHistory = viewModel::setPersistChatHistory,
-                        onRememberPosition = viewModel::setRememberPosition,
-                        onReadingProgress = viewModel::setShowReadingProgress,
-                        onGreenChecks = viewModel::setShowGreenChecks,
-                        onActionSuggestions = viewModel::setShowActionSuggestions,
-                        onPromptNavigator = viewModel::setShowChatPromptNavigator,
-                        onAskPopover = viewModel::setEnableAskPopover,
-                        onClearSelection = viewModel::setClearSelectionAfterPopover,
-                        onSystemNotifications = { enabled ->
-                            viewModel.setSystemNotifications(enabled)
-                            if (enabled && Build.VERSION.SDK_INT >= 33 &&
-                                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                            ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        },
-                        onLoginNotifications = viewModel::setEmailLoginNotifications,
-                        onPasswordNotifications = viewModel::setEmailPasswordNotifications,
-                        onLineSpacing = viewModel::setLineSpacing,
-                        onSelectionHighlight = viewModel::setSelectionHighlight,
-                        onActiveTheme = viewModel::setActiveTheme,
-                        onSaveApiKeys = viewModel::saveUserApiKeys
-                    )
+        Box(Modifier.matchParentSize().layerBackdrop(bottomNavBackdrop)) {
+            when {
+                state.error != null && state.courses.isEmpty() -> ErrorState(state.error.orEmpty(), viewModel::bootstrap)
+                state.lesson != null || state.lessonLoading -> LessonScreen(
+                    state = state,
+                    onBack = viewModel::closeLesson,
+                    onBookmark = viewModel::toggleBookmark,
+                    onCompleted = viewModel::toggleCompleted,
+                    onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
+                    onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) },
+                    onAskSelection = viewModel::askPythiAboutSelection
+                )
+                selectedCourse != null -> CourseDetailScreen(
+                    state = state,
+                    onBack = viewModel::closeCourse,
+                    onLesson = { sectionId -> viewModel.openLesson(selectedCourse.id, sectionId) },
+                    onRequestAccess = { viewModel.requestCourseAccess(selectedCourse.id) }
+                )
+                else -> AnimatedContent(targetState = state.rootTab, label = "rootTab") { tab ->
+                    when (tab) {
+                        RootTab.COURSES -> CoursesScreen(
+                            state,
+                            onCourse = viewModel::openCourse,
+                            onProfile = { viewModel.selectTab(RootTab.PROFILE) },
+                            darkMode = resolvedDark,
+                            onThemeToggle = { origin ->
+                                themeRevealOrigin = origin
+                                // SYSTEM means the current phone palette, so the first tap must always
+                                // create a visible change instead of merely replacing SYSTEM with DARK.
+                                viewModel.setTheme(if (resolvedDark) ThemeMode.LIGHT else ThemeMode.DARK)
+                            }
+                        )
+                        RootTab.SEARCH -> SearchScreen(state, viewModel::setSearchQuery, viewModel::openLesson)
+                        RootTab.PROFILE -> ProfileScreen(
+                            state,
+                            onAuth = { viewModel.setAuthOpen(true) },
+                            onLogout = viewModel::logout,
+                            onAdmin = viewModel::openAdmin,
+                            onSaveMemory = viewModel::savePythiMemory,
+                            onRemoveMemory = viewModel::removePythiMemory,
+                            onUpdateName = viewModel::updateProfileName,
+                            onUpdatePhoto = { (context as? MainActivity)?.launchProfilePhotoPicker() },
+                            onSendAdminMessage = viewModel::sendAdminMessage,
+                            onChangePassword = viewModel::changePassword
+                        )
+                        RootTab.SETTINGS -> SettingsScreen(
+                            state = state,
+                            onTheme = { mode, origin ->
+                                themeRevealOrigin = origin
+                                viewModel.setTheme(mode)
+                            },
+                            onReduceMotion = viewModel::setReduceMotion,
+                            onHaptics = viewModel::setHaptics,
+                            onFontScale = viewModel::setFontScale,
+                            onKeepScreenOn = viewModel::setKeepScreenOn,
+                            onPersistChatHistory = viewModel::setPersistChatHistory,
+                            onRememberPosition = viewModel::setRememberPosition,
+                            onReadingProgress = viewModel::setShowReadingProgress,
+                            onGreenChecks = viewModel::setShowGreenChecks,
+                            onActionSuggestions = viewModel::setShowActionSuggestions,
+                            onPromptNavigator = viewModel::setShowChatPromptNavigator,
+                            onAskPopover = viewModel::setEnableAskPopover,
+                            onClearSelection = viewModel::setClearSelectionAfterPopover,
+                            onSystemNotifications = { enabled ->
+                                viewModel.setSystemNotifications(enabled)
+                                if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                                ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            },
+                            onLoginNotifications = viewModel::setEmailLoginNotifications,
+                            onPasswordNotifications = viewModel::setEmailPasswordNotifications,
+                            onLineSpacing = viewModel::setLineSpacing,
+                            onSelectionHighlight = viewModel::setSelectionHighlight,
+                            onActiveTheme = viewModel::setActiveTheme,
+                            onSaveApiKeys = viewModel::saveUserApiKeys
+                        )
+                    }
                 }
             }
         }
@@ -396,6 +401,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
             BottomGlassNav(
                 active = state.rootTab,
                 onTab = viewModel::selectTab,
+                backdrop = bottomNavBackdrop,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
             )
         }

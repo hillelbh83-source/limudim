@@ -149,9 +149,12 @@ import com.hillel.studyzone.model.UiState
 import com.hillel.studyzone.ui.components.GlassSurface
 import com.hillel.studyzone.ui.components.ChatRichText
 import com.hillel.studyzone.ui.components.LessonMathView
+import com.hillel.studyzone.ui.components.LiquidBottomTab
+import com.hillel.studyzone.ui.components.LiquidBottomTabs
 import com.hillel.studyzone.ui.components.Pressable
 import com.hillel.studyzone.ui.components.RoundActionButton
 import com.hillel.studyzone.ui.theme.StudyBlue
+import com.kyant.backdrop.Backdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -282,7 +285,12 @@ fun ThemeRevealOverlay(background: Color, requestedOrigin: Offset) {
 
 @Composable
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier = Modifier) {
+fun BottomGlassNav(
+    active: RootTab,
+    onTab: (RootTab) -> Unit,
+    backdrop: Backdrop,
+    modifier: Modifier = Modifier
+) {
     val tabs = remember {
         listOf(
             Triple(RootTab.COURSES, Icons.Rounded.School, "לימודים"),
@@ -292,110 +300,32 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         )
     }
     val activeIndex = tabs.indexOfFirst { it.first == active }.coerceAtLeast(0)
-    val direction = LocalLayoutDirection.current
-    var widthPx by remember { mutableIntStateOf(0) }
-    var dragging by remember { mutableStateOf(false) }
-    var pointerX by remember { mutableFloatStateOf(0f) }
-    var visualIndex by remember { mutableIntStateOf(activeIndex) }
-    LaunchedEffect(activeIndex) {
-        if (!dragging) visualIndex = activeIndex
-    }
-    val tabWidthPx = if (widthPx > 0) widthPx.toFloat() / tabs.size else 0f
-    val snappedPhysicalIndex = if (direction == LayoutDirection.Rtl) tabs.lastIndex - visualIndex else visualIndex
-    val snappedX = snappedPhysicalIndex * tabWidthPx
-    val dragX = if (tabWidthPx > 0f) {
-        (pointerX - tabWidthPx / 2f).coerceIn(0f, (widthPx - tabWidthPx).coerceAtLeast(0f))
-    } else 0f
-    val animatedSnappedX by animateFloatAsState(
-        targetValue = snappedX,
-        animationSpec = spring(stiffness = 680f, dampingRatio = .82f),
-        label = "navIndicator"
-    )
-    val indicatorX = if (dragging) dragX else animatedSnappedX
-    GlassSurface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp).navigationBarsPadding(),
-        shape = RoundedCornerShape(30.dp)
+
+    LiquidBottomTabs(
+        selectedTabIndex = { activeIndex },
+        onTabSelected = { onTab(tabs[it].first) },
+        backdrop = backdrop,
+        tabsCount = tabs.size,
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 36.dp)
+            .padding(bottom = 12.dp)
     ) {
-        Box(
-            Modifier.fillMaxWidth().padding(6.dp).height(58.dp)
-                .onSizeChanged { widthPx = it.width }
-                .pointerInteropFilter { event ->
-                    if (widthPx <= 0) return@pointerInteropFilter false
-                    fun logicalIndexAt(x: Float): Int {
-                        val physical = (x / (widthPx.toFloat() / tabs.size)).toInt().coerceIn(0, tabs.lastIndex)
-                        return if (direction == LayoutDirection.Rtl) tabs.lastIndex - physical else physical
-                    }
-                    val x = event.x.coerceIn(0f, widthPx.toFloat())
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            pointerX = x
-                            visualIndex = logicalIndexAt(x)
-                            dragging = true
-                            true
-                        }
-                        MotionEvent.ACTION_MOVE -> {
-                            pointerX = x
-                            visualIndex = logicalIndexAt(x)
-                            true
-                        }
-                        MotionEvent.ACTION_UP -> {
-                            pointerX = x
-                            val next = logicalIndexAt(x)
-                            visualIndex = next
-                            dragging = false
-                            onTab(tabs[next].first)
-                            true
-                        }
-                        MotionEvent.ACTION_CANCEL -> {
-                            visualIndex = activeIndex
-                            dragging = false
-                            true
-                        }
-                        else -> true
-                    }
-                }
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                if (tabWidthPx > 0f) {
-                    drawRoundRect(
-                        color = StudyBlue.copy(alpha = .15f),
-                        topLeft = Offset(indicatorX, 0f),
-                        size = androidx.compose.ui.geometry.Size(tabWidthPx, size.height),
-                        cornerRadius = CornerRadius(22.dp.toPx(), 22.dp.toPx())
-                    )
-                }
-            }
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceAround) {
-                tabs.forEach { item ->
-                    val selected = visualIndex == tabs.indexOf(item)
-                    val iconScale by animateFloatAsState(
-                        if (selected) 1.08f else 1f,
-                        spring(stiffness = 760f, dampingRatio = .7f),
-                        label = "navIcon"
-                    )
-                    Column(
-                        Modifier.weight(1f).height(58.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .padding(horizontal = 2.dp, vertical = 7.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            item.second,
-                            item.third,
-                            modifier = Modifier.size(23.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
-                            tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            item.third,
-                            color = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+        tabs.forEach { item ->
+            LiquidBottomTab(onClick = { onTab(item.first) }) {
+                Icon(
+                    item.second,
+                    item.third,
+                    modifier = Modifier.size(28.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    item.third,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
