@@ -1,6 +1,5 @@
 package com.hillel.studyzone.ui.components
 
-import com.hillel.studyzone.BuildConfig
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color as AndroidColor
@@ -155,7 +154,7 @@ private fun SiteWebView(
     modifier: Modifier
 ) {
     val context = LocalContext.current
-    val webRoot = BuildConfig.WEB_BASE_URL.trimEnd('/')
+    val webRoot = com.hillel.studyzone.BuildConfig.WEB_BASE_URL.trimEnd('/')
     val allowedHost = remember(webRoot) { Uri.parse(webRoot).host.orEmpty() }
     val url = remember(route, webRoot) {
         if (route.isBlank()) "$webRoot/" else "$webRoot/#${route.trimStart('#', '/')}"

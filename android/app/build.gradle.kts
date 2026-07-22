@@ -8,6 +8,9 @@ plugins {
 val studyZoneApiUrl = providers.gradleProperty("STUDYZONE_API_URL")
     .orElse(providers.environmentVariable("STUDYZONE_API_URL"))
     .getOrElse("https://studyzone-cpav.onrender.com")
+val studyZoneWebUrl = providers.gradleProperty("STUDYZONE_WEB_URL")
+    .orElse(providers.environmentVariable("STUDYZONE_WEB_URL"))
+    .getOrElse("https://studyzone-1-yhnz.onrender.com")
 val googleWebClientId = providers.gradleProperty("GOOGLE_WEB_CLIENT_ID")
     .orElse(providers.environmentVariable("GOOGLE_WEB_CLIENT_ID"))
     .getOrElse("126122580284-a7rlabpvmfumcsopjt2v97eci8det4jp.apps.googleusercontent.com")
@@ -27,6 +30,11 @@ android {
             "String",
             "API_BASE_URL",
             "\"$studyZoneApiUrl\""
+        )
+        buildConfigField(
+            "String",
+            "WEB_BASE_URL",
+            "\"$studyZoneWebUrl\""
         )
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
     }
