@@ -180,7 +180,7 @@ fun ChatRichText(
         val webView = remember {
             LocalRendererWebView(context).apply {
                 configureLocalRenderer(palette.background)
-                contentDescription = "שיחת Pythi"
+                contentDescription = "שיחת פיתי"
                 addJavascriptInterface(ChatActionBridge(context, onEditMessage, onRetryMessage), "AndroidChat")
                 webViewClient = rendererClient()
                 loadDataWithBaseURL(LOCAL_BASE_URL, shell, "text/html", "UTF-8", null)
@@ -492,7 +492,7 @@ private class ChatActionBridge(
     fun copy(text: String) {
         Handler(Looper.getMainLooper()).post {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Pythi", text))
+            clipboard.setPrimaryClip(ClipData.newPlainText("פיתי", text))
         }
     }
 
@@ -581,8 +581,11 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .cursor { display:inline-block; width:2px; height:1.05em; margin-inline-start:3px; vertical-align:-.14em;
                   background:var(--blue); animation:blink .85s step-end infinite; }
         .attachment-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
-        .attachment { max-width:190px; padding:5px 9px; border-radius:999px; background:#ffffff22;
+        .attachment { max-width:190px; display:inline-flex; align-items:center; gap:5px; direction:rtl;
+                      padding:5px 9px; border-radius:999px; background:#ffffff22;
                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.78em; }
+        .attachment svg { width:13px; height:13px; flex:none; fill:none; stroke:currentColor;
+                          stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
         .reply-quote { margin:0 0 8px; padding:8px 10px; border-radius:13px; border-right:3px solid var(--blue);
                        background:color-mix(in srgb,var(--surface) 72%,transparent); color:inherit; opacity:.92;
                        font-size:.82em; line-height:1.4;
@@ -596,15 +599,15 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .message-action:active { background:color-mix(in srgb,var(--surface) 82%,transparent); color:var(--fg); }
         .message-action:active { transform:scale(.9); }
         #message-menu-backdrop { position:fixed; inset:0; z-index:9997; background:transparent; }
-        #message-menu { position:fixed; z-index:9998; width:246px; overflow:hidden; direction:ltr;
+        #message-menu { position:fixed; z-index:9998; width:246px; overflow:hidden; direction:rtl;
                         border:1px solid color-mix(in srgb,var(--outline) 82%,transparent); border-radius:27px;
                         background:color-mix(in srgb,var(--surface) 94%,transparent); color:var(--fg);
                         box-shadow:0 24px 70px #00000060,inset 0 1px 0 #ffffff20;
                         -webkit-backdrop-filter:blur(30px) saturate(170%); backdrop-filter:blur(30px) saturate(170%);
                         animation:menuIn .18s cubic-bezier(.2,.82,.2,1) both; }
-        .menu-time { padding:20px 20px 10px; color:var(--muted); font-size:.86em; direction:ltr; text-align:left; }
+        .menu-time { padding:20px 20px 10px; color:var(--muted); font-size:.86em; direction:rtl; text-align:right; }
         .menu-item { appearance:none; width:100%; min-height:62px; display:flex; align-items:center; gap:17px;
-                     padding:10px 20px; border:0; background:transparent; color:var(--fg); text-align:left;
+                     padding:10px 20px; border:0; background:transparent; color:var(--fg); text-align:right;
                      font:600 17px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
         .menu-item:active { background:color-mix(in srgb,var(--fg) 9%,transparent); }
         .menu-icon { width:28px; height:28px; flex:none; display:grid; place-items:center; }
@@ -858,6 +861,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           if (name === 'edit') return open + '<path d="M4 20l4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16 4 20z"></path><path d="M13.8 6.4l3.8 3.8"></path></svg>';
           if (name === 'retry') return open + '<path d="M20 7v5h-5"></path><path d="M19 12a7 7 0 1 0-1.9 4.8"></path></svg>';
           if (name === 'share') return open + '<circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="M8.2 10.8l7.6-4.5M8.2 13.2l7.6 4.5"></path></svg>';
+          if (name === 'attach') return open + '<path d="M21.4 11.6l-8.5 8.5a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 1 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"></path></svg>';
           return open + '</svg>';
         }
 
@@ -886,8 +890,8 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           const messageDate = new Date(Number(message.createdAt) || Date.now());
           const now = new Date();
           const sameDay = messageDate.toDateString() === now.toDateString();
-          const dayLabel = sameDay ? 'Today' : messageDate.toLocaleDateString('en-US', {month:'short',day:'numeric'});
-          const when = dayLabel + ', ' + messageDate.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
+          const dayLabel = sameDay ? 'היום' : messageDate.toLocaleDateString('he-IL', {month:'short',day:'numeric'});
+          const when = dayLabel + ', ' + messageDate.toLocaleTimeString('he-IL', {hour:'numeric',minute:'2-digit'});
           const time = document.createElement('div'); time.className = 'menu-time'; time.textContent = when;
           menu.appendChild(time);
           function item(icon, label, action) {
@@ -897,15 +901,15 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             button.addEventListener('click', function(event) { event.stopPropagation(); closeMessageMenu(); action(); });
             menu.appendChild(button);
           }
-          item('copy', 'Copy', function() { chatBridge('copy', message.text || ''); });
-          item('select', 'Select text', function() {
+          item('copy', 'העתקה', function() { chatBridge('copy', message.text || ''); });
+          item('select', 'בחירת טקסט', function() {
             const content = bubble.querySelector('.message-content');
             if (!content) return;
             bubble.style.webkitUserSelect = 'text'; bubble.style.userSelect = 'text';
             const range = document.createRange(); range.selectNodeContents(content);
             const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
           });
-          item('edit', 'Edit message', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
+          item('edit', 'עריכת הודעה', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
           document.body.appendChild(backdrop); document.body.appendChild(menu);
           const width = 246, height = 236;
           menu.style.left = Math.max(10, Math.min(window.innerWidth - width - 10, clientX - width / 2)) + 'px';
@@ -942,17 +946,18 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           messageFrame = 0;
           const messages = pendingMessages;
           const root = document.getElementById('messages');
-          const preservedUserBubbles = Object.create(null);
-          root.querySelectorAll('.message.user[data-message-id]').forEach(function(node) {
-            preservedUserBubbles[node.getAttribute('data-message-id')] = node;
+          const preservedBubbles = Object.create(null);
+          root.querySelectorAll('.message[data-message-id]').forEach(function(node) {
+            if (node.getAttribute('data-streaming') === 'true') return;
+            preservedBubbles[node.getAttribute('data-message-id')] = node;
             node.remove();
           });
           root.innerHTML = '';
           (messages || []).forEach(function(message) {
             const messageId = String(message.id || '');
-            const preservedUser = preservedUserBubbles[messageId];
-            if (preservedUser) {
-              root.appendChild(preservedUser);
+            const preserved = preservedBubbles[messageId];
+            if (preserved && !message.streaming) {
+              root.appendChild(preserved);
               renderedMessageIds.add(messageId);
               return;
             }
@@ -961,6 +966,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             bubble.className = 'message ' + (message.role === 'user' ? 'user' : 'model') +
               (message.error ? ' error' : '') + (entering ? ' enter' : '');
             bubble.setAttribute('data-message-id', messageId);
+            bubble.setAttribute('data-streaming', message.streaming ? 'true' : 'false');
             bubble.setAttribute('dir', 'auto');
             if (message.replyTo) {
               const reply = document.createElement('div'); reply.className = 'reply-quote'; reply.textContent = message.replyTo;
@@ -968,7 +974,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             }
             const content = document.createElement('div'); content.className = 'message-content';
             if (!message.text && message.streaming) {
-              content.innerHTML = '<span class="typing" aria-label="Pythi חושבת"><i></i><i></i><i></i></span>';
+              content.innerHTML = '<span class="typing" aria-label="פיתי חושבת"><i></i><i></i><i></i></span>';
             } else {
               content.innerHTML = renderMarkdown(message.text || '') + (message.streaming ? '<span class="cursor"></span>' : '');
             }
@@ -976,7 +982,9 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             if (Array.isArray(message.attachments) && message.attachments.length) {
               const attachments = document.createElement('div'); attachments.className = 'attachment-row';
               message.attachments.forEach(function(name) {
-                const chip = document.createElement('span'); chip.className = 'attachment'; chip.textContent = '📎 ' + name; attachments.appendChild(chip);
+                const chip = document.createElement('span'); chip.className = 'attachment';
+                chip.innerHTML = iconSvg('attach') + '<span>' + escapeHtml(name) + '</span>';
+                attachments.appendChild(chip);
               });
               bubble.appendChild(attachments);
             }

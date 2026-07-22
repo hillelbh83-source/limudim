@@ -51,7 +51,7 @@ internal class NativeContentRepository(
 
         val (chapter, section) = flattened[selectedIndex]
         val index = loadIndex(course.id)
-        val raw = resolveLessonText(index?.optJSONObject(chapter.id), chapter.id, section.id)
+        val raw = resolveLessonText(index, chapter.id, section.id)
         val normalized = normalizeLessonContent(raw.ifBlank { section.preview })
         if (normalized.isBlank()) return null
 
@@ -124,11 +124,10 @@ internal class NativeContentRepository(
         bundledCourses.forEach courseLoop@ { course ->
             val index = loadIndex(course.id) ?: return@courseLoop
             course.chapters.forEach chapterLoop@ { chapter ->
-                val chapterContent = index.optJSONObject(chapter.id) ?: return@chapterLoop
                 chapter.sections.forEach sectionLoop@ { section ->
                     val key = "${course.id}/${section.id}"
                     if (key in seen) return@sectionLoop
-                    val content = resolveLessonText(chapterContent, chapter.id, section.id)
+                    val content = resolveLessonText(index, chapter.id, section.id)
                     if (!content.contains(query, ignoreCase = true)) return@sectionLoop
                     results += SearchResult(
                         courseId = course.id,
@@ -173,23 +172,43 @@ internal class NativeContentRepository(
 
     private fun cacheFile(directory: String) = File(cacheDirectory, "$directory.json")
 
-    private fun resolveLessonText(chapter: JSONObject?, chapterId: String, sectionId: String): String {
-        if (chapter == null) return ""
-        chapter.opt(sectionId).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+    private fun resolveLessonText(index: JSONObject?, chapterId: String, sectionId: String): String {
+        if (index == null) return ""
+        val primaryChapter = index.optJSONObject(chapterId)
+        findLessonTextInChapter(primaryChapter, chapterId, sectionId).takeIf { it.isNotBlank() }?.let { return it }
 
-        // Navigation metadata can describe nested sub-sections (for example
-        // 2.2.4) while the generated index stores their parent lesson (2.2).
-        var candidate = sectionId.substringBeforeLast('.', "")
-        while (candidate.isNotBlank()) {
-            chapter.opt(candidate).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
-            candidate = candidate.substringBeforeLast('.', "")
+        // Some generated indexes and hand-authored navigation trees drift by one level:
+        // a section can be listed under a nested id while the lesson text lives under
+        // a sibling or parent chapter object. Scan the remaining bundled chapters before
+        // showing a placeholder.
+        val keys = index.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key == chapterId) continue
+            findLessonTextInChapter(index.optJSONObject(key), chapterId, sectionId)
+                .takeIf { it.isNotBlank() }
+                ?.let { return it }
         }
-
-        // Lecture-style courses store one source under the bare chapter id and
-        // expose several sidebar anchors that all belong to that lecture.
-        chapter.opt(chapterId).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
         return ""
     }
+
+    private fun findLessonTextInChapter(chapter: JSONObject?, chapterId: String, sectionId: String): String {
+        if (chapter == null) return ""
+        lessonTextCandidates(chapterId, sectionId).forEach { candidate ->
+            chapter.opt(candidate).asLessonText()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        return ""
+    }
+
+    private fun lessonTextCandidates(chapterId: String, sectionId: String): List<String> = buildList {
+        add(sectionId)
+        var candidate = sectionId.substringBeforeLast('.', "")
+        while (candidate.isNotBlank()) {
+            add(candidate)
+            candidate = candidate.substringBeforeLast('.', "")
+        }
+        add(chapterId)
+    }.distinct()
 
     private fun readAssetText(path: String): String? = runCatching {
         appContext.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -333,6 +352,13 @@ internal fun normalizeLessonContent(source: String): String {
         .replace(Regex("""<h[3-6]\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n### ")
         .replace(Regex("""</h[3-6]\s*>""", RegexOption.IGNORE_CASE), "\n\n")
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""<summary\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n**")
+        .replace(Regex("""</summary\s*>""", RegexOption.IGNORE_CASE), "**\n\n")
+        .replace(Regex("""</?details\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n")
+        .replace(Regex("""<img\b[^>]*\balt=(["'])(.*?)\1[^>]*>""", RegexOption.IGNORE_CASE)) { match ->
+            "\n\n[תמונה: ${match.groupValues[2].ifBlank { "איור בשיעור" }}]\n\n"
+        }
+        .replace(Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n[תמונה בשיעור]\n\n")
         .replace(Regex("""<li\b[^>]*>""", RegexOption.IGNORE_CASE), "\n- ")
         .replace(Regex("""</li\s*>""", RegexOption.IGNORE_CASE), "\n")
         .replace(Regex("""<blockquote\b[^>]*>""", RegexOption.IGNORE_CASE), "\n\n> ")
@@ -373,23 +399,29 @@ internal fun normalizeLessonContent(source: String): String {
 private fun replaceMathComponentTags(source: String): String {
     var text = source
     fun replace(name: String, display: Boolean) {
-        text = Regex("""<$name\s+math=\{\s*String\.raw`([\s\S]*?)`\s*\}\s*/>""").replace(text) { match ->
-            wrapLatex(match.groupValues[1], display)
+        text = Regex("""<$name\b([^>]*)\bmath=\{\s*String\.raw`([\s\S]*?)`\s*\}([^>]*)/>""").replace(text) { match ->
+            wrapLatex(match.groupValues[2], display || mathAttributesAreBlock(match.groupValues[1] + match.groupValues[3]))
         }
-        text = Regex("""<$name\s+math=\{\s*`([\s\S]*?)`\s*\}\s*/>""").replace(text) { match ->
-            wrapLatex(match.groupValues[1], display)
+        text = Regex("""<$name\b([^>]*)\bmath=\{\s*`([\s\S]*?)`\s*\}([^>]*)/>""").replace(text) { match ->
+            wrapLatex(match.groupValues[2], display || mathAttributesAreBlock(match.groupValues[1] + match.groupValues[3]))
         }
-        text = Regex("""<$name\s+math="((?:\\.|[^"])*)"\s*/>""").replace(text) { match ->
-            wrapLatex(match.groupValues[1], display)
+        text = Regex("""<$name\b([^>]*)\bmath="((?:\\.|[^"])*)"([^>]*)/>""").replace(text) { match ->
+            wrapLatex(match.groupValues[2], display || mathAttributesAreBlock(match.groupValues[1] + match.groupValues[3]))
         }
-        text = Regex("""<$name\s+math='((?:\\.|[^'])*)'\s*/>""").replace(text) { match ->
-            wrapLatex(match.groupValues[1], display)
+        text = Regex("""<$name\b([^>]*)\bmath='((?:\\.|[^'])*)'([^>]*)/>""").replace(text) { match ->
+            wrapLatex(match.groupValues[2], display || mathAttributesAreBlock(match.groupValues[1] + match.groupValues[3]))
         }
     }
     replace("BlockMath", display = true)
     replace("InlineMath", display = false)
+    replace("Math", display = false)
     return text
 }
+
+private fun mathAttributesAreBlock(attributes: String): Boolean =
+    Regex(
+        """\b(?:block|display|displayMode)\b\s*=\s*(?:\{\s*true\s*\}|["']true["'])|\b(?:block|display|displayMode)\b(?!\s*=)"""
+    ).containsMatchIn(attributes)
 
 private fun wrapLatex(raw: String, display: Boolean): String {
     val normalized = normalizeLatex(raw).trim()

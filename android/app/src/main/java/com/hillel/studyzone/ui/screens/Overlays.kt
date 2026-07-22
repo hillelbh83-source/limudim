@@ -7,10 +7,10 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
@@ -42,7 +42,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -69,6 +68,7 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Check
@@ -124,6 +124,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -131,6 +132,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -149,6 +151,7 @@ import com.hillel.studyzone.model.UiState
 import com.hillel.studyzone.ui.components.GlassSurface
 import com.hillel.studyzone.ui.components.ChatRichText
 import com.hillel.studyzone.ui.components.LessonMathView
+import com.hillel.studyzone.ui.components.LocalHapticsEnabled
 import com.hillel.studyzone.ui.components.Pressable
 import com.hillel.studyzone.ui.components.RoundActionButton
 import com.hillel.studyzone.ui.theme.StudyBlue
@@ -157,6 +160,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 @Composable
 fun IntroSplash(visible: Boolean) {
@@ -293,6 +297,8 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
     }
     val activeIndex = tabs.indexOfFirst { it.first == active }.coerceAtLeast(0)
     val direction = LocalLayoutDirection.current
+    val view = LocalView.current
+    val hapticsEnabled = LocalHapticsEnabled.current
     var widthPx by remember { mutableIntStateOf(0) }
     var dragging by remember { mutableStateOf(false) }
     var pointerX by remember { mutableFloatStateOf(0f) }
@@ -312,12 +318,30 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         label = "navIndicator"
     )
     val indicatorX = if (dragging) dragX else animatedSnappedX
-    GlassSurface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp).navigationBarsPadding(),
-        shape = RoundedCornerShape(30.dp)
+    val navShape = RoundedCornerShape(34.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .navigationBarsPadding()
+            .shadow(
+                elevation = 18.dp,
+                shape = navShape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = .14f),
+                spotColor = StudyBlue.copy(alpha = .16f)
+            )
+            .clip(navShape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = .72f))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = .22f), Color.Transparent, Color.Black.copy(alpha = .04f))
+                )
+            )
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .46f), navShape)
     ) {
         Box(
-            Modifier.fillMaxWidth().padding(6.dp).height(58.dp)
+            Modifier.fillMaxWidth().padding(5.dp).height(60.dp)
                 .onSizeChanged { widthPx = it.width }
                 .pointerInteropFilter { event ->
                     if (widthPx <= 0) return@pointerInteropFilter false
@@ -343,6 +367,9 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
                             val next = logicalIndexAt(x)
                             visualIndex = next
                             dragging = false
+                            if (hapticsEnabled && tabs[next].first != active) {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
                             onTab(tabs[next].first)
                             true
                         }
@@ -357,11 +384,34 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 if (tabWidthPx > 0f) {
+                    val lensWidth = tabWidthPx * if (dragging) .98f else .9f
+                    val lensLeft = indicatorX + (tabWidthPx - lensWidth) / 2f
+                    val lensTop = 3.dp.toPx()
+                    val lensHeight = size.height - 6.dp.toPx()
                     drawRoundRect(
-                        color = StudyBlue.copy(alpha = .15f),
-                        topLeft = Offset(indicatorX, 0f),
-                        size = androidx.compose.ui.geometry.Size(tabWidthPx, size.height),
-                        cornerRadius = CornerRadius(22.dp.toPx(), 22.dp.toPx())
+                        brush = Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = .30f),
+                                StudyBlue.copy(alpha = .46f),
+                                StudyBlue.copy(alpha = .26f)
+                            )
+                        ),
+                        topLeft = Offset(lensLeft, lensTop),
+                        size = androidx.compose.ui.geometry.Size(lensWidth, lensHeight),
+                        cornerRadius = CornerRadius(25.dp.toPx(), 25.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = .34f),
+                        topLeft = Offset(lensLeft + 7.dp.toPx(), lensTop + 4.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(lensWidth - 14.dp.toPx(), 1.1.dp.toPx()),
+                        cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = .22f),
+                        topLeft = Offset(lensLeft, lensTop),
+                        size = androidx.compose.ui.geometry.Size(lensWidth, lensHeight),
+                        cornerRadius = CornerRadius(25.dp.toPx(), 25.dp.toPx()),
+                        style = Stroke(1.dp.toPx())
                     )
                 }
             }
@@ -374,8 +424,8 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
                         label = "navIcon"
                     )
                     Column(
-                        Modifier.weight(1f).height(58.dp)
-                            .clip(RoundedCornerShape(22.dp))
+                        Modifier.weight(1f).height(60.dp)
+                            .clip(RoundedCornerShape(25.dp))
                             .padding(horizontal = 2.dp, vertical = 7.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
@@ -384,12 +434,12 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
                             item.second,
                             item.third,
                             modifier = Modifier.size(23.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
-                            tint = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
                             item.third,
-                            color = if (selected) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.labelMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -562,7 +612,8 @@ fun ChatOverlay(
             Unit
         }
     }
-    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
     val keyboardVisible = imeBottom > 0
     val targetSheetFraction = when {
             state.chatExpanded -> .96f
@@ -570,12 +621,19 @@ fun ChatOverlay(
             else -> .64f
         }
     val sheetFraction = remember { Animatable(targetSheetFraction) }
+    val sheetKeyboardInset = remember { Animatable(imeBottom.toFloat()) }
     val dragScope = rememberCoroutineScope()
     var dragDistance by remember { mutableFloatStateOf(0f) }
     var dragStartFraction by remember { mutableFloatStateOf(targetSheetFraction) }
     LaunchedEffect(targetSheetFraction) {
         sheetFraction.animateTo(
             targetSheetFraction,
+            tween(durationMillis = if (state.settings.reduceMotion) 0 else 230, easing = FastOutSlowInEasing)
+        )
+    }
+    LaunchedEffect(imeBottom) {
+        sheetKeyboardInset.animateTo(
+            imeBottom.toFloat(),
             tween(durationMillis = if (state.settings.reduceMotion) 0 else 230, easing = FastOutSlowInEasing)
         )
     }
@@ -596,7 +654,7 @@ fun ChatOverlay(
       ) {
         RoundActionButton(
             icon = Icons.Rounded.SmartToy,
-            contentDescription = "פתיחת Pythi",
+            contentDescription = "פתיחת פיתי",
             onClick = { onOpen(true) },
             active = true,
             size = 58.dp
@@ -608,7 +666,11 @@ fun ChatOverlay(
         exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 8 })
     ) {
         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-          val availableHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+          val availableHeightPx = (constraints.maxHeight - sheetKeyboardInset.value).coerceAtLeast(1f)
+          val minSheetHeightPx = with(density) { 260.dp.toPx() }.coerceAtMost(availableHeightPx)
+          val sheetHeight = with(density) {
+              (availableHeightPx * sheetFraction.value).coerceIn(minSheetHeightPx, availableHeightPx).toDp()
+          }
           Box(
               Modifier.fillMaxSize().clickable(
                   interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
@@ -618,12 +680,12 @@ fun ChatOverlay(
           Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(sheetFraction.value)
+                .height(sheetHeight)
+                .offset { IntOffset(0, -sheetKeyboardInset.value.roundToInt()) }
                 .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .background(MaterialTheme.colorScheme.background)
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .65f), RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .navigationBarsPadding()
-                .imePadding()
         ) {
             Box(
                 Modifier.fillMaxWidth().height(22.dp).pointerInput(state.chatExpanded) {
@@ -767,7 +829,9 @@ fun ChatOverlay(
                             shape = CircleShape,
                             contentPadding = 9.dp
                         ) {
-                            Text("📎 ${attachment.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
+                            Icon(Icons.Rounded.AttachFile, null, modifier = Modifier.size(16.dp), tint = StudyBlue)
+                            Spacer(Modifier.width(5.dp))
+                            Text(attachment.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
                             Spacer(Modifier.width(6.dp))
                             Icon(Icons.Rounded.Close, "הסרת קובץ", modifier = Modifier.size(15.dp))
                         }
@@ -903,13 +967,6 @@ private fun PythiComposer(
                         if (editText.text.toString() != input) {
                             editText.setText(input)
                             editText.setSelection(input.length)
-                            if (input.isNotBlank()) {
-                                editText.post {
-                                    editText.requestFocus()
-                                    (editText.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                                        ?.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
-                                }
-                            }
                         }
                     },
                     modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 122.dp)

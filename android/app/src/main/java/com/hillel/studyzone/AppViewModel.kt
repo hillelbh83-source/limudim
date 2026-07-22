@@ -75,6 +75,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var chatRenderJob: Job? = null
     private var chatTimerJob: Job? = null
     @Volatile private var chatGeneration = 0L
+    @Volatile private var localSettingsWriteProtectUntil = 0L
     private val pendingChatText = AtomicReference<String?>(null)
 
     init {
@@ -121,8 +122,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun applyLocalSnapshot(snapshot: LocalSnapshot, includeCachedSession: Boolean) {
         mutableState.update { current ->
+            val settings = if (
+                !includeCachedSession &&
+                System.currentTimeMillis() < localSettingsWriteProtectUntil &&
+                snapshot.settings != current.settings
+            ) {
+                current.settings
+            } else {
+                snapshot.settings
+            }
             current.copy(
-                settings = snapshot.settings,
+                settings = settings,
                 completedSections = if (includeCachedSession) snapshot.completed else current.completedSections,
                 bookmarkedSections = if (includeCachedSession) snapshot.bookmarks else current.bookmarkedSections,
                 user = if (includeCachedSession) snapshot.user else current.user,
@@ -402,6 +412,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setActiveTheme(value: String) = updateSettings(mutableState.value.settings.copy(activeThemeId = value))
 
     private fun updateSettings(settings: AppSettings) {
+        localSettingsWriteProtectUntil = System.currentTimeMillis() + 1_500L
         mutableState.update { it.copy(settings = settings) }
         viewModelScope.launch { preferences.saveSettings(settings) }
         settingsSyncJob?.cancel()
