@@ -247,22 +247,20 @@ fun IntroSplash(visible: Boolean) {
 @Composable
 fun ThemeRevealOverlay(background: Color, requestedOrigin: Offset) {
     var previousBackground by remember { mutableStateOf(background) }
-    var overlayColor by remember { mutableStateOf(background) }
+    var oldColor by remember { mutableStateOf(background) }
+    var newColor by remember { mutableStateOf(background) }
     val progress = remember { Animatable(1f) }
     LaunchedEffect(background) {
         if (background != previousBackground) {
-            overlayColor = previousBackground
+            oldColor = previousBackground
+            newColor = background
             previousBackground = background
             progress.snapTo(0f)
-            progress.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+            progress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
         }
     }
     if (progress.value < 1f) {
-        Canvas(
-            Modifier.fillMaxSize().graphicsLayer {
-                compositingStrategy = CompositingStrategy.Offscreen
-            }
-        ) {
+        Canvas(Modifier.fillMaxSize()) {
             val origin = Offset(
                 requestedOrigin.x.coerceIn(0f, size.width),
                 requestedOrigin.y.coerceIn(0f, size.height)
@@ -274,8 +272,8 @@ fun ThemeRevealOverlay(background: Color, requestedOrigin: Offset) {
                 hypot(size.width - origin.x, size.height - origin.y)
             )
             val radius = maxRadius * progress.value
-            drawRect(overlayColor)
-            drawCircle(Color.Transparent, radius = radius, center = origin, blendMode = BlendMode.Clear)
+            drawRect(oldColor)
+            drawCircle(newColor, radius = radius, center = origin)
         }
     }
 }
@@ -306,12 +304,15 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
     val dragX = if (tabWidthPx > 0f) {
         (pointerX - tabWidthPx / 2f).coerceIn(0f, (widthPx - tabWidthPx).coerceAtLeast(0f))
     } else 0f
-    val animatedSnappedX by animateFloatAsState(
-        targetValue = snappedX,
-        animationSpec = spring(stiffness = 680f, dampingRatio = .82f),
+    val targetX = if (dragging) dragX else snappedX
+    val indicatorX by animateFloatAsState(
+        targetValue = targetX,
+        animationSpec = spring(
+            stiffness = if (dragging) 1400f else 620f,
+            dampingRatio = if (dragging) 0.95f else 0.78f
+        ),
         label = "navIndicator"
     )
-    val indicatorX = if (dragging) dragX else animatedSnappedX
     GlassSurface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp).navigationBarsPadding(),
         shape = RoundedCornerShape(30.dp)
@@ -357,11 +358,23 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 if (tabWidthPx > 0f) {
+                    val cornerRadiusPx = 22.dp.toPx()
                     drawRoundRect(
-                        color = StudyBlue.copy(alpha = .15f),
+                        brush = Brush.horizontalGradient(
+                            listOf(
+                                StudyBlue.copy(alpha = .24f),
+                                StudyBlue.copy(alpha = .16f)
+                            )
+                        ),
                         topLeft = Offset(indicatorX, 0f),
                         size = androidx.compose.ui.geometry.Size(tabWidthPx, size.height),
-                        cornerRadius = CornerRadius(22.dp.toPx(), 22.dp.toPx())
+                        cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
+                    )
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = .28f),
+                        topLeft = Offset(indicatorX + 2.dp.toPx(), 1.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size((tabWidthPx - 4.dp.toPx()).coerceAtLeast(0f), 1.5.dp.toPx()),
+                        cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
                     )
                 }
             }
@@ -564,11 +577,7 @@ fun ChatOverlay(
     }
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
     val keyboardVisible = imeBottom > 0
-    val targetSheetFraction = when {
-            state.chatExpanded -> .96f
-            keyboardVisible -> .74f
-            else -> .64f
-        }
+    val targetSheetFraction = if (state.chatExpanded) .96f else .74f
     val sheetFraction = remember { Animatable(targetSheetFraction) }
     val dragScope = rememberCoroutineScope()
     var dragDistance by remember { mutableFloatStateOf(0f) }
@@ -641,7 +650,7 @@ fun ChatOverlay(
                         onDragEnd = {
                             val expand = sheetFraction.value >= .80f
                             onExpanded(expand)
-                            val destination = if (expand) .96f else if (keyboardVisible) .74f else .64f
+                            val destination = if (expand) .96f else .74f
                             dragScope.launch {
                                 sheetFraction.animateTo(destination, tween(220, easing = FastOutSlowInEasing))
                             }

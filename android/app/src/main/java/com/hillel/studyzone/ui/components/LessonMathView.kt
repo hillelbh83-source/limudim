@@ -886,8 +886,8 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           const messageDate = new Date(Number(message.createdAt) || Date.now());
           const now = new Date();
           const sameDay = messageDate.toDateString() === now.toDateString();
-          const dayLabel = sameDay ? 'Today' : messageDate.toLocaleDateString('en-US', {month:'short',day:'numeric'});
-          const when = dayLabel + ', ' + messageDate.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
+          const dayLabel = sameDay ? 'היום' : messageDate.toLocaleDateString('he-IL', {month:'short',day:'numeric'});
+          const when = dayLabel + ', ' + messageDate.toLocaleTimeString('he-IL', {hour:'numeric',minute:'2-digit'});
           const time = document.createElement('div'); time.className = 'menu-time'; time.textContent = when;
           menu.appendChild(time);
           function item(icon, label, action) {
@@ -897,15 +897,15 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             button.addEventListener('click', function(event) { event.stopPropagation(); closeMessageMenu(); action(); });
             menu.appendChild(button);
           }
-          item('copy', 'Copy', function() { chatBridge('copy', message.text || ''); });
-          item('select', 'Select text', function() {
+          item('copy', 'העתקה', function() { chatBridge('copy', message.text || ''); });
+          item('select', 'סימון טקסט', function() {
             const content = bubble.querySelector('.message-content');
             if (!content) return;
             bubble.style.webkitUserSelect = 'text'; bubble.style.userSelect = 'text';
             const range = document.createRange(); range.selectNodeContents(content);
             const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
           });
-          item('edit', 'Edit message', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
+          item('edit', 'עריכת הודעה', function() { chatBridge('edit', String(message.id || ''), message.text || ''); });
           document.body.appendChild(backdrop); document.body.appendChild(menu);
           const width = 246, height = 236;
           menu.style.left = Math.max(10, Math.min(window.innerWidth - width - 10, clientX - width / 2)) + 'px';
@@ -942,17 +942,32 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
           messageFrame = 0;
           const messages = pendingMessages;
           const root = document.getElementById('messages');
-          const preservedUserBubbles = Object.create(null);
-          root.querySelectorAll('.message.user[data-message-id]').forEach(function(node) {
-            preservedUserBubbles[node.getAttribute('data-message-id')] = node;
-            node.remove();
+          const preservedBubbles = Object.create(null);
+          root.querySelectorAll('.message[data-message-id]').forEach(function(node) {
+            preservedBubbles[node.getAttribute('data-message-id')] = node;
           });
-          root.innerHTML = '';
+          const activeIds = new Set();
           (messages || []).forEach(function(message) {
             const messageId = String(message.id || '');
-            const preservedUser = preservedUserBubbles[messageId];
-            if (preservedUser) {
-              root.appendChild(preservedUser);
+            activeIds.add(messageId);
+            const existing = preservedBubbles[messageId];
+            if (existing) {
+              const content = existing.querySelector('.message-content');
+              if (content) {
+                if (!message.text && message.streaming) {
+                  content.innerHTML = '<span class="typing" aria-label="פיתי חושבת"><i></i><i></i><i></i></span>';
+                } else {
+                  content.innerHTML = renderMarkdown(message.text || '') + (message.streaming ? '<span class="cursor"></span>' : '');
+                }
+              }
+              if (!message.streaming && message.role === 'model' && !existing.querySelector('.message-actions')) {
+                const actions = document.createElement('div'); actions.className = 'message-actions';
+                actions.appendChild(actionButton('copy', 'העתקת התשובה', function() { chatBridge('copy', message.text || ''); }));
+                actions.appendChild(actionButton('retry', 'ניסיון נוסף', function() { chatBridge('retry', String(message.id || '')); }));
+                actions.appendChild(actionButton('share', 'שיתוף התשובה', function() { chatBridge('share', message.text || ''); }));
+                existing.appendChild(actions);
+              }
+              existing.classList.remove('enter');
               renderedMessageIds.add(messageId);
               return;
             }
@@ -968,7 +983,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             }
             const content = document.createElement('div'); content.className = 'message-content';
             if (!message.text && message.streaming) {
-              content.innerHTML = '<span class="typing" aria-label="Pythi חושבת"><i></i><i></i><i></i></span>';
+              content.innerHTML = '<span class="typing" aria-label="פיתי חושבת"><i></i><i></i><i></i></span>';
             } else {
               content.innerHTML = renderMarkdown(message.text || '') + (message.streaming ? '<span class="cursor"></span>' : '');
             }
@@ -994,9 +1009,11 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
             root.appendChild(bubble);
             renderedMessageIds.add(messageId);
           });
+          root.querySelectorAll('.message[data-message-id]').forEach(function(node) {
+            if (!activeIds.has(node.getAttribute('data-message-id'))) node.remove();
+          });
           renderedOnce = true;
           requestAnimationFrame(function() { window.scrollTo(0, document.body.scrollHeight); });
-          });
         };
       </script>
     </head>

@@ -613,6 +613,7 @@ class StudyZoneApi(context: Context) {
                 JSONObject()
                     .put("courseName", course?.title ?: "StudyZone")
                     .put("currentContext", lesson?.let { "${it.title} (${it.sectionId})" } ?: "מסך הקורסים")
+                    .put("languageInstruction", "כל השיחות והמענים של פיתי חייבים להיות בעברית בלבד. על פיתי להשיב תמיד בעברית בלבד בכל הודעה, תוך תמיכה מלאה בסימוני KaTeX למתמטיקה ולמושגים מדעיים.")
                     .put(
                         "userMemories",
                         buildString {
