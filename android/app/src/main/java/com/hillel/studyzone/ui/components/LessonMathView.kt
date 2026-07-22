@@ -19,6 +19,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -180,7 +181,8 @@ private data class WebPalette(
     val surface: String,
     val muted: String,
     val outline: String,
-    val error: String
+    val error: String,
+    val dark: Boolean
 )
 
 @Composable
@@ -190,7 +192,8 @@ private fun currentWebPalette() = WebPalette(
     surface = MaterialTheme.colorScheme.surfaceVariant.toArgb().toHexColor(),
     muted = MaterialTheme.colorScheme.onSurfaceVariant.toArgb().toHexColor(),
     outline = MaterialTheme.colorScheme.outlineVariant.toArgb().toHexColor(),
-    error = MaterialTheme.colorScheme.error.toArgb().toHexColor()
+    error = MaterialTheme.colorScheme.error.toArgb().toHexColor(),
+    dark = MaterialTheme.colorScheme.background.luminance() < .5f
 )
 
 private const val LOCAL_BASE_URL = "file:///android_asset/katex/"
@@ -286,7 +289,7 @@ private fun lessonShell(palette: WebPalette, bodySize: Float, katexSource: Strin
       <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes" />
       <link rel="stylesheet" href="katex.min.css" />
       <style>
-        :root { color-scheme: light dark; --blue:#1473ff; --fg:${palette.foreground}; --muted:${palette.muted};
+        :root { color-scheme:${if (palette.dark) "dark" else "light"}; --blue:#1473ff; --fg:${palette.foreground}; --muted:${palette.muted};
                 --surface:${palette.surface}; --outline:${palette.outline}; }
         * { box-sizing:border-box; }
         html,body { min-height:100%; background:${palette.background}; }
@@ -337,10 +340,10 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
       <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=2,user-scalable=yes" />
       <link rel="stylesheet" href="katex.min.css" />
       <style>
-        :root { color-scheme:light dark; --blue:#1473ff; --fg:${palette.foreground}; --muted:${palette.muted};
+        :root { color-scheme:${if (palette.dark) "dark" else "light"}; --blue:#1473ff; --fg:${palette.foreground}; --muted:${palette.muted};
                 --surface:${palette.surface}; --outline:${palette.outline}; --error:${palette.error}; }
         * { box-sizing:border-box; }
-        html,body { min-height:100%; background:transparent; }
+        html,body { min-height:100%; background:${palette.background}; }
         body { margin:0; padding:10px 4px 22px; color:var(--fg);
                font:${bodySize}px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
                -webkit-font-smoothing:antialiased; }
@@ -410,7 +413,7 @@ private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String)
         .plot-legend { display:flex; direction:ltr; flex-wrap:wrap; gap:7px 12px; margin-top:11px; }
         .plot-row { direction:ltr; display:flex; align-items:center; gap:7px; font-size:.83em; color:var(--muted); }
         .plot-dot { width:9px; height:9px; border-radius:50%; flex:none; }
-        @media (prefers-color-scheme:dark) { .flash-card { background:linear-gradient(145deg,#1e293b,#312e81); color:white; } }
+        ${if (palette.dark) ".flash-card { background:linear-gradient(145deg,#1e293b,#312e81); color:white; }" else ""}
         @keyframes pulse { 50% { opacity:.28; transform:translateY(-2px); } }
         @keyframes blink { 50% { opacity:0; } }
       </style>

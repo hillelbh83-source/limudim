@@ -308,12 +308,23 @@ private fun CourseCard(
                 CourseIcon(icon, 58.dp)
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$progressPercent%", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "$progressPercent%",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text("הושלם", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                 }
             }
             Spacer(Modifier.height(20.dp))
-            Text(course.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                course.title,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
             Spacer(Modifier.height(9.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(

@@ -67,7 +67,6 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Lock
@@ -516,7 +515,7 @@ fun ChatOverlay(
     onInput: (String) -> Unit,
     onAttach: () -> Unit,
     onRemoveAttachment: (Long) -> Unit,
-    onVoice: (Boolean) -> Unit,
+    onVoice: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onClear: () -> Unit,
@@ -691,22 +690,23 @@ private fun PythiComposer(
     focusRequester: FocusRequester,
     onInput: (String) -> Unit,
     onAttach: () -> Unit,
-    onVoice: (Boolean) -> Unit,
+    onVoice: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val expanded = input.isNotBlank() || hasAttachments
-    val shape = RoundedCornerShape(34.dp)
-    val composerColor = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFF242424) else MaterialTheme.colorScheme.surfaceVariant
-    val contentColor = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFF5F5F5) else MaterialTheme.colorScheme.onSurface
-    val placeholderColor = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFB7B7B7) else MaterialTheme.colorScheme.onSurfaceVariant
+    val shape = RoundedCornerShape(30.dp)
+    val composerColor = MaterialTheme.colorScheme.surfaceVariant
+    val contentColor = MaterialTheme.colorScheme.onSurface
+    val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
             androidx.compose.foundation.text.BasicTextField(
                 value = input,
                 onValueChange = onInput,
-                modifier = fieldModifier.focusRequester(focusRequester),
+                modifier = fieldModifier.fillMaxWidth().focusRequester(focusRequester),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = contentColor, textAlign = TextAlign.Right),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(StudyBlue),
                 minLines = 1,
@@ -715,8 +715,15 @@ private fun PythiComposer(
                 keyboardActions = KeyboardActions(onSend = { if (!streaming && (input.isNotBlank() || hasAttachments)) onSend() }),
                 decorationBox = { inner ->
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        if (input.isBlank()) Text("שאלו את פיתי", color = placeholderColor, textAlign = TextAlign.Right)
-                        inner()
+                        if (input.isBlank()) {
+                            Text(
+                                "שאלו את פיתי",
+                                modifier = Modifier.fillMaxWidth(),
+                                color = placeholderColor,
+                                textAlign = TextAlign.Right
+                            )
+                        }
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { inner() }
                     }
                 }
             )
@@ -727,20 +734,26 @@ private fun PythiComposer(
             modifier
                 .clip(shape)
                 .background(composerColor)
-                .border(1.dp, Color.White.copy(alpha = if (androidx.compose.foundation.isSystemInDarkTheme()) .18f else .34f), shape)
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .7f), shape)
                 .animateContentSize(spring(dampingRatio = .9f, stiffness = 620f))
-                .padding(horizontal = 9.dp, vertical = 8.dp)
+                .padding(horizontal = 8.dp, vertical = 7.dp)
         ) {
-            if (!expanded) {
-                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Keep the same BasicTextField instance in the composition while the composer grows.
+            // Recreating it after the first character used to drop focus and dismiss typing.
+            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!expanded) {
                     ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
-                    field(Modifier.weight(1f).padding(horizontal = 7.dp))
-                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", { onVoice(false) }, contentColor)
-                    Spacer(Modifier.width(5.dp))
-                    ComposerIcon(Icons.Rounded.GraphicEq, "שיחה קולית עם פיתי", { onVoice(true) }, Color.White, background = StudyBlue)
                 }
-            } else {
-                field(Modifier.fillMaxWidth().heightIn(min = 52.dp, max = 122.dp).padding(horizontal = 10.dp, vertical = 7.dp))
+                field(
+                    Modifier.weight(1f)
+                        .heightIn(min = if (expanded) 48.dp else 44.dp, max = 122.dp)
+                        .padding(horizontal = if (expanded) 8.dp else 6.dp, vertical = if (expanded) 6.dp else 0.dp)
+                )
+                if (!expanded) {
+                    ComposerIcon(Icons.Rounded.Mic, "הכתבה קולית", onVoice, contentColor)
+                }
+            }
+            if (expanded) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     ComposerIcon(Icons.Rounded.Add, "צירוף קובץ", onAttach, contentColor)
                     Spacer(Modifier.weight(1f))
@@ -765,8 +778,15 @@ private fun ComposerIcon(
     tint: Color,
     background: Color = Color.Transparent
 ) {
-    IconButton(onClick = onClick, modifier = Modifier.size(46.dp).clip(CircleShape).background(background)) {
-        Icon(icon, description, tint = tint, modifier = Modifier.size(if (background == Color.Transparent) 25.dp else 23.dp))
+    IconButton(onClick = onClick, modifier = Modifier.size(42.dp)) {
+        Box(
+            Modifier.size(if (background == Color.Transparent) 38.dp else 35.dp)
+                .clip(CircleShape)
+                .background(background),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, description, tint = tint, modifier = Modifier.size(if (background == Color.Transparent) 21.dp else 19.dp))
+        }
     }
 }
 

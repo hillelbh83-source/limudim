@@ -80,7 +80,6 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
     private var activeIntent by mutableStateOf<Intent?>(null)
-    private var sendVoiceImmediately = false
     private val chatFilesLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.addChatAttachments(uris)
     }
@@ -93,9 +92,7 @@ class MainActivity : ComponentActivity() {
         } else ""
         if (text.isNotBlank()) {
             viewModel.setChatInput(text)
-            if (sendVoiceImmediately) viewModel.sendChat()
         }
-        sendVoiceImmediately = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -175,8 +172,7 @@ class MainActivity : ComponentActivity() {
         profilePhotoLauncher.launch("image/*")
     }
 
-    fun launchVoiceInput(sendImmediately: Boolean) {
-        sendVoiceImmediately = sendImmediately
+    fun launchVoiceInput() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("he", "IL").toLanguageTag())
@@ -368,7 +364,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onInput = viewModel::setChatInput,
                 onAttach = { (context as? MainActivity)?.launchChatAttachmentPicker() },
                 onRemoveAttachment = viewModel::removeChatAttachment,
-                onVoice = { sendImmediately -> (context as? MainActivity)?.launchVoiceInput(sendImmediately) },
+                onVoice = { (context as? MainActivity)?.launchVoiceInput() },
                 onSend = viewModel::sendChat,
                 onStop = viewModel::stopChat,
                 onClear = viewModel::clearChat,

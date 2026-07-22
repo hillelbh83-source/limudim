@@ -92,6 +92,7 @@ fun GlassSurface(
         modifier = modifier,
         shape = shape,
         color = background,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(1.dp, border),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
