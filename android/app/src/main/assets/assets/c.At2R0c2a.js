@@ -1,0 +1,1 @@
+import{a as o,j as r}from"./e.X0UnX4v5.js";import{F as s}from"./c.DEzorQ41.js";import{q as i}from"./c.o_vpYnld.js";import"./c.Bpfl0gxT.js";import"./c.a_l1O7ok.js";import"./c.CivjPOTz.js";import"./c.CmbHN3vy.js";import"./c.B8wc1g0_.js";const l=()=>{const t=o.useMemo(()=>i.slice(0,20),[]);return r.jsx(s,{questions:t,title:"מבחן לדוגמא מס' 1",examId:"mock_1"})};export{l as default};

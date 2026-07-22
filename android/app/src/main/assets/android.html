@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-app-target="android">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#071A33" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https://assets.mixkit.co; connect-src 'self' blob: https://studyzone-cpav.onrender.com https://generativelanguage.googleapis.com https://*.wikipedia.org https://workflowbugreport.hillelben14.workers.dev;" />
+  <title>StudyZone</title>
+  <link rel="icon" type="image/svg+xml" href="./images/pythi-mark.svg" />
+  <script>
+    (function () {
+      try {
+        var raw = localStorage.getItem('StudyMaster_user_settings_v1');
+        var settings = raw ? JSON.parse(raw) : {};
+        var mode = settings.themeMode || settings.theme || 'system';
+        var dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.classList.toggle('light', !dark);
+        document.documentElement.dataset.themeId = settings.activeThemeId || 'default';
+      } catch (_) {}
+    })();
+  </script>
+  <style>
+    html,body,#root{height:100%;margin:0;background:#f6f4ef;overflow:hidden}
+    html.dark,html.dark body,html.dark #root{background:#0b0f14}
+    .android-boot{position:fixed;inset:0;display:grid;place-items:center;background:inherit;transition:opacity .17s ease;z-index:99999}
+    .android-boot--hide{opacity:0;pointer-events:none}
+    .android-boot svg{width:76px;height:76px;filter:drop-shadow(0 16px 26px rgba(7,26,51,.22))}
+    @media(prefers-reduced-motion:reduce){.android-boot{transition-duration:.08s}}
+  </style>
+  <script type="module" crossorigin src="/app/assets/e.X0UnX4v5.js"></script>
+  <link rel="stylesheet" crossorigin href="/app/assets/a.CPqe_3Q9.css">
+</head>
+<body>
+  <div id="sm-loading-skeleton" class="android-boot" aria-hidden="true">
+    <svg viewBox="0 0 64 64"><defs><linearGradient id="b" x1="10" y1="8" x2="54" y2="58"><stop stop-color="#4D7CFF"/><stop offset="1" stop-color="#35D7FF"/></linearGradient></defs><path d="M15 20.5C15 14.7 19.7 10 25.5 10h13C44.3 10 49 14.7 49 20.5v18C49 44.3 44.3 49 38.5 49H31l-9.3 6.2c-1.4.9-3.2-.1-3.2-1.8V48A10.5 10.5 0 0 1 15 38.5v-18Z" fill="url(#b)"/><path d="M23 28c0-3.9 3.1-7 7-7h4c3.9 0 7 3.1 7 7v7c0 3.9-3.1 7-7 7h-4c-3.9 0-7-3.1-7-7v-7Z" fill="#071A33"/><circle cx="29" cy="31.5" r="2.2" fill="#EAF7FF"/><circle cx="35" cy="31.5" r="2.2" fill="#EAF7FF"/><path d="M28.5 37c2.2 1.5 4.8 1.5 7 0" fill="none" stroke="#73DCFF" stroke-width="1.8" stroke-linecap="round"/><path d="m46.5 8 1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6L46.5 8Z" fill="#fff"/></svg>
+  </div>
+  <div id="root"></div>
+</body>
+</html>
+

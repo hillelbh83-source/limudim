@@ -1,51 +1,45 @@
 # StudyZone for Android
 
-אפליקציית Android Native ב־Kotlin וב־Jetpack Compose, המחוברת לאותו שרת ואותו תוכן של אתר StudyZone.
+האפליקציה היא מעטפת Android דקה שמריצה build מקומי של ממשק ה־React מתוך ה־APK.
+היא אינה טוענת את אתר StudyZone ואינה מכילה fallback לפרונטנד מרוחק. גישה לרשת
+מותרת רק ל־API ולשירותי משתמש כגון התחברות, סנכרון ופיתי.
 
 ## מבנה
 
-- `MainActivity` — Activity יחידה, edge-to-edge, Splash מערכת ו־Activity Result לבחירת PDF.
-- `AppViewModel` — מצב UI מרכזי ופעולות משתמש.
-- `data/` — תוכן Native מקומי, API, cookie session מתמשך ו־DataStore מקומי.
-- `model/` — מודלים בלתי תלויים ב־UI.
-- `ui/theme/` — ערכת מערכת כברירת מחדל, Light ו־Dark.
-- `ui/components/` — משטחי glass, כפתורים מונפשים וקורא שיעורים עם KaTeX מקומי.
-- `ui/screens/` — קורסים, חיפוש, שמורים, כלים, פרופיל, PDF, Pythi וניהול.
+- `MainActivity.kt` — WebView יחיד וארוך־חיים, system splash, בחירת קבצים ו־bridge מצומצם.
+- `../android.html` — נקודת הכניסה המקומית עם CSP ייעודי לאפליקציה.
+- `app/src/main/assets/` — bundle מקומי של React שמצורף ל־APK ונבנה ב־repository הראשי.
+- `res/` — אייקון adaptive/monochrome, splash וערכות יום/לילה.
 
-## פתיחה והרצה
+הקבצים מוגשים דרך `WebViewAssetLoader` תחת
+`https://appassets.androidplatform.net/app/`. זוהי כתובת origin בטוחה לקבצים מתוך
+ה־APK, לא כתובת אתר או שרת מרוחק.
 
-פתחו את התיקייה `android/` ב־Android Studio Quail 2 ומעלה. הפרויקט משתמש ב־JDK 17,
-AGP 9.3, Gradle 9.5 ו־`compileSdk 36`.
+## בנייה מקומית
 
-כתובות ברירת המחדל מוגדרות ב־`app/build.gradle.kts`. לסביבת פיתוח אפשר להעביר:
+נדרשים JDK 17 ו־Android SDK 36. ה־React bundle כבר נמצא בתוך תיקיית ה־assets:
+
+```bash
+cd android
+./gradlew :app:assembleDebug
+```
+
+כתובת ה־API בלבד ניתנת להחלפה דרך Gradle property או environment variable:
 
 ```properties
 STUDYZONE_API_URL=https://your-api.example.com
-STUDYZONE_WEB_URL=https://your-web.example.com
 ```
 
-כ־Gradle properties. תקשורת HTTP לא מוצפנת חסומה כברירת מחדל.
+אין property לכתובת אתר. `MainActivity` חוסמת במפורש את hosts הישנים של
+הפרונטנד, וקישור חיצוני אחר יכול לצאת לדפדפן רק בעקבות gesture של המשתמש.
 
-## בנייה אוטומטית
+## CI ואבטחה
 
-ה־workflow ב־`.github/workflows/android-apk.yml` רץ בכל push,
-בונה APK מותקן וממוזער במצב Release ומעלה אותו עם checksum כ־GitHub Actions artifact למשך 14 יום.
+ה־workflow ב־`.github/workflows/android-apk.yml`:
 
-## תוכן ו־LaTeX
+1. מאמת את תוכן הקורסים המקומי שנמצא ב־assets.
+2. בונה Release APK מתוך תיקיית `android/` בלבד.
+3. מעלה APK יחד עם checksum.
 
-האפליקציה כוללת ב־APK קטלוג של 28 קורסים ו־779 סעיפים, ולכן מסך הבית והשיעורים אינם
-ממתינים ל־`/api/mobile` ואינם נפתחים בדפדפן. אינדקס של קורס נפתח בזיכרון רק כאשר
-זקוקים לו. רענון פרופיל, התקדמות והרשאות מתבצע מול השרת ברקע לאחר הצגת המסך הראשון.
-גם מאגרי התרגול הסטטיים נכללים בתוכן ה־Native: 360 שאלות ממבחני קורס מלאים ועוד
-563 שאלות ותרגילים שהיו רכיבים אינטראקטיביים באתר, עם תשובות והסברים זמינים לקריאה.
-
-נוסחאות נשמרות עם delimiters של LaTeX, מנורמלות מתוכן ה־TSX ומרונדרות בכיוון LTR
-בתוך מסמך RTL באמצעות KaTeX שמצורף לאפליקציה, ללא CDN. הגרסה האינטראקטיבית באתר
-נשארת פעולה משנית מפורשת בלבד. אם `/api/mobile` ייפרס בעתיד, שכבת הנתונים יודעת
-להשתמש בו כמקור משלים בלי לפגוע במסלול המקומי המהיר.
-
-## הפצת Release
-
-ה־workflow מפיק Release APK אופטימלי אך חותם אותו במפתח debug של סביבת CI כדי שיהיה ניתן להתקנה. להפצה ב־Play Store צריך להוסיף
-keystore מאובטח ב־GitHub Secrets ולהוסיף job נפרד ל־AAB חתום; אין לשמור מפתח חתימה ב־repository.
-זהות חתימת ה־preview נשמרת ב־GitHub Actions cache כדי ש־APK עוקבים מאותו workflow יוכלו להתעדכן זה מעל זה; מחיקת ה־cache תחייב הסרת התקנה קודמת.
+ה־Release ב־CI חתום במפתח preview בלבד. הפצת Play Store דורשת keystore פרטי
+ו־AAB חתום, ואין לשמור מפתח כזה ב־repository.

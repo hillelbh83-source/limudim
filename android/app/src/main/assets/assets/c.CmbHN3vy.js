@@ -1,0 +1,1 @@
+const i={light:()=>t(10),medium:()=>t(25),heavy:()=>t(50),success:()=>t([15,50,15]),error:()=>t([80]),selection:()=>t(5)};function t(a){try{navigator.vibrate&&navigator.vibrate(a)}catch{}}export{i as h};

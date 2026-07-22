@@ -1,0 +1,33 @@
+{
+  "courses": [
+    "bagrut-gemara",
+    "bagrut-halacha",
+    "bagrut-tanakh",
+    "civics",
+    "complex",
+    "dapar",
+    "data-structures",
+    "electricity",
+    "groups",
+    "harmonic",
+    "history",
+    "history-exam",
+    "infi2",
+    "infi3",
+    "infi4",
+    "intro-ee",
+    "jeremiah",
+    "job-from-the-storm",
+    "lashon",
+    "linear-systems",
+    "machshevet",
+    "mans-search-for-meaning",
+    "mechanics",
+    "ode",
+    "probability",
+    "sages-and-their-wisdom",
+    "signals-and-systems",
+    "tanakh-exams",
+    "topology"
+  ]
+}
