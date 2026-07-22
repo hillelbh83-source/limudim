@@ -70,8 +70,8 @@ fun LiquidBottomTabs(
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
     val containerColor =
-        if (isLightTheme) Color(0xFFFAFAFA).copy(0.4f)
-        else Color(0xFF121212).copy(0.4f)
+        if (isLightTheme) Color.White.copy(0.72f)
+        else Color(0xFF121212).copy(0.46f)
 
     val tabsBackdrop = rememberLayerBackdrop()
 
@@ -130,11 +130,12 @@ fun LiquidBottomTabs(
                 }
             )
         }
-        LaunchedEffect(selectedTabIndex) {
-            snapshotFlow { selectedTabIndex() }
-                .collectLatest { index ->
-                    currentIndex = index
-                }
+        val selectedIndex = selectedTabIndex().coerceIn(0, tabsCount - 1)
+        LaunchedEffect(selectedIndex) {
+            if (currentIndex != selectedIndex || dampedDragAnimation.targetValue.fastRoundToInt() != selectedIndex) {
+                currentIndex = selectedIndex
+                dampedDragAnimation.animateToValue(selectedIndex.toFloat())
+            }
         }
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { currentIndex }
@@ -274,11 +275,14 @@ fun LiquidBottomTabs(
                     onDrawSurface = {
                         val progress = dampedDragAnimation.pressProgress
                         drawRect(
-                            if (isLightTheme) Color.Black.copy(0.1f)
+                            if (isLightTheme) Color.White.copy(0.36f)
                             else Color.White.copy(0.1f),
                             alpha = 1f - progress
                         )
-                        drawRect(Color.Black.copy(alpha = 0.03f * progress))
+                        drawRect(
+                            if (isLightTheme) Color.White.copy(alpha = 0.16f * progress)
+                            else Color.Black.copy(alpha = 0.03f * progress)
+                        )
                     }
                 )
                 .height(56f.dp)
