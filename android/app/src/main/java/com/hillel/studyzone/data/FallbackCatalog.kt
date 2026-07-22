@@ -1,6 +1,5 @@
 package com.hillel.studyzone.data
 
-import com.hillel.studyzone.BuildConfig
 import com.hillel.studyzone.model.Chapter
 import com.hillel.studyzone.model.Course
 import com.hillel.studyzone.model.Lesson
@@ -79,7 +78,7 @@ object FallbackCatalog {
             sectionId = sectionId.ifBlank { "1.1" },
             title = "מבוא ל${course.title}",
             content = "# ${course.title}\n\n${course.description}\n\nתוכן הקורס המלא זמין בחבילת התוכן של האפליקציה. אפשר לנסות לרענן את התוכן כאשר יש חיבור לרשת.",
-            interactiveUrl = "${BuildConfig.WEB_BASE_URL.trimEnd('/')}/#${course.id}"
+            interactiveUrl = ""
         )
     }
 

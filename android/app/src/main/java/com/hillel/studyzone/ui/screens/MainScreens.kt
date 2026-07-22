@@ -53,12 +53,15 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Calculate
+import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -66,6 +69,8 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -83,6 +88,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -97,8 +103,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,10 +129,11 @@ fun CoursesScreen(
     onCourse: (Course) -> Unit,
     onProfile: () -> Unit,
     darkMode: Boolean,
-    onThemeToggle: () -> Unit,
+    onThemeToggle: (Offset) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var category by remember { mutableStateOf("all") }
+    var themeButtonCenter by remember { mutableStateOf(Offset.Zero) }
     val categories = listOf(
         "all" to "הכול",
         "math" to "מתמטיקה",
@@ -174,7 +185,11 @@ fun CoursesScreen(
                 RoundActionButton(
                     icon = if (darkMode) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
                     contentDescription = "החלפת ערכת צבעים",
-                    onClick = onThemeToggle,
+                    onClick = { onThemeToggle(themeButtonCenter) },
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        val topLeft = coordinates.positionInRoot()
+                        themeButtonCenter = topLeft + Offset(coordinates.size.width / 2f, coordinates.size.height / 2f)
+                    },
                     size = 46.dp
                 )
                 Spacer(Modifier.width(8.dp))
@@ -245,7 +260,24 @@ fun CoursesScreen(
                         enter = fadeIn() + slideInVertically(initialOffsetY = { it / 5 }) + scaleIn(initialScale = .97f),
                         exit = fadeOut() + scaleOut(targetScale = .97f)
                     ) {
-                        CourseCard(course, state.completedSections, onClick = { onCourse(course) })
+                        val courseId = course.id.lowercase()
+                        val accessGranted = course.isAvailable && state.courseAccessLoaded &&
+                            (state.courseAccessAll || courseId in state.accessibleCourseIds)
+                        val accessLabel = when {
+                            !course.isAvailable -> "בפיתוח"
+                            !state.courseAccessLoaded -> "בודק גישה"
+                            courseId in state.publicAccessCourseIds -> "ציבורי"
+                            accessGranted -> "פתוח"
+                            courseId in state.pendingCourseIds -> "ממתין"
+                            else -> "נעול"
+                        }
+                        CourseCard(
+                            course = course,
+                            completed = state.completedSections,
+                            accessGranted = accessGranted,
+                            accessLabel = accessLabel,
+                            onClick = { onCourse(course) }
+                        )
                     }
                 }
             }
@@ -255,7 +287,13 @@ fun CoursesScreen(
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Unit) {
+private fun CourseCard(
+    course: Course,
+    completed: Set<String>,
+    accessGranted: Boolean,
+    accessLabel: String,
+    onClick: () -> Unit
+) {
     val sectionCount = course.chapters.sumOf { it.sections.size }
     val completedCount = completed.count { it.startsWith("${course.id}/") }.coerceAtMost(sectionCount)
     val targetProgress = if (sectionCount == 0) 0f else completedCount.toFloat() / sectionCount
@@ -279,12 +317,23 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
                 CourseIcon(icon, 58.dp)
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$progressPercent%", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "$progressPercent%",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text("הושלם", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                 }
             }
             Spacer(Modifier.height(20.dp))
-            Text(course.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                course.title,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
             Spacer(Modifier.height(9.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -305,12 +354,12 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
                 }
                 Box(
                     Modifier.clip(CircleShape)
-                        .background(if (course.isAvailable) StudyBlue.copy(alpha = .12f) else MaterialTheme.colorScheme.surfaceVariant)
+                        .background(if (accessGranted) StudyBlue.copy(alpha = .12f) else MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 10.dp, vertical = 7.dp)
                 ) {
                     Text(
-                        if (course.isAvailable) "פתוח" else "בפיתוח",
-                        color = if (course.isAvailable) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                        accessLabel,
+                        color = if (accessGranted) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
@@ -329,7 +378,7 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
-                        !course.isAvailable -> "פרטים ובקשת גישה"
+                        !accessGranted -> if (accessLabel == "בודק גישה") "טוען הרשאות…" else "נדרשת הרשאה"
                         progressPercent == 100 -> "הקורס הושלם"
                         progressPercent > 0 -> "המשך ללמוד"
                         else -> "התחלת הקורס"
@@ -340,13 +389,17 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
                 )
                 Box(
                     Modifier.size(42.dp).clip(CircleShape)
-                        .background(if (progressPercent > 0) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
+                        .background(if (accessGranted && progressPercent > 0) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (progressPercent == 100) Icons.Rounded.CheckCircle else Icons.Rounded.ChevronLeft,
+                        when {
+                            !accessGranted -> Icons.Rounded.Lock
+                            progressPercent == 100 -> Icons.Rounded.CheckCircle
+                            else -> Icons.Rounded.ChevronLeft
+                        },
                         null,
-                        tint = if (progressPercent > 0) Color.White else MaterialTheme.colorScheme.onSurface
+                        tint = if (accessGranted && progressPercent > 0) Color.White else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -762,32 +815,282 @@ fun ProfileScreen(
     onAuth: () -> Unit,
     onLogout: () -> Unit,
     onAdmin: () -> Unit,
-    onTheme: (ThemeMode) -> Unit,
-    onReduceMotion: (Boolean) -> Unit,
-    onHaptics: (Boolean) -> Unit,
-    onFontScale: (Float) -> Unit,
-    onKeepScreenOn: (Boolean) -> Unit
+    onSaveMemory: (String, String) -> Unit,
+    onRemoveMemory: (String) -> Unit,
+    onUpdateName: (String) -> Unit,
+    onUpdatePhoto: () -> Unit,
+    onSendAdminMessage: (String) -> Unit,
+    onChangePassword: (String, String) -> Unit
 ) {
+    var displayName by remember { mutableStateOf(state.user?.displayName.orEmpty()) }
+    var memoryTitle by remember { mutableStateOf("") }
+    var memoryDetails by remember { mutableStateOf("") }
+    var oldPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var adminMessage by remember { mutableStateOf("") }
+    var passwordMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(state.user?.displayName) {
+        displayName = state.user?.displayName.orEmpty()
+    }
+
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 130.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { Text("פרופיל והגדרות", style = MaterialTheme.typography.headlineLarge) }
+        item { Text("פרופיל", style = MaterialTheme.typography.headlineLarge) }
         item {
             GlassSurface(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProfileAvatar(
-                        photoUrl = state.user?.photoUrl,
-                        displayName = state.user?.displayName ?: "אורח",
-                        size = 62.dp
-                    )
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        ProfileAvatar(
+                            photoUrl = state.user?.photoUrl,
+                            displayName = state.user?.displayName ?: "אורח",
+                            size = 62.dp
+                        )
+                        if (state.user != null) {
+                            Box(
+                                Modifier.size(27.dp).clip(CircleShape).background(StudyBlue).clickable(onClick = onUpdatePhoto),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.CameraAlt, "החלפת תמונת פרופיל", tint = Color.White, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(state.user?.displayName ?: "אורח", style = MaterialTheme.typography.titleLarge)
                         Text(state.user?.email ?: "התחברו כדי לסנכרן התקדמות", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (state.user == null) TextButton(onClick = onAuth) { Text("התחברות") }
+                }
+            }
+        }
+        if (state.user != null) {
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.ChatBubbleOutline, null, tint = StudyBlue)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("הודעה למנהל", style = MaterialTheme.typography.titleLarge)
+                                Text("הצעה, שאלה או דיווח על תקלה", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        OutlinedTextField(
+                            value = adminMessage,
+                            onValueChange = { adminMessage = it.take(2_000) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("כתבו כאן ואנחנו נקרא הכול…") },
+                            minLines = 3,
+                            maxLines = 6,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        Pressable(
+                            onClick = {
+                                if (adminMessage.isNotBlank()) {
+                                    onSendAdminMessage(adminMessage)
+                                    adminMessage = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = adminMessage.isNotBlank(),
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.ChatBubbleOutline, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("שליחת הודעה", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = StudyBlue)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("פרטי החשבון", style = MaterialTheme.typography.titleLarge)
+                                Text("השם שמופיע באתר ובשיחות עם פיתי", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        OutlinedTextField(
+                            value = displayName,
+                            onValueChange = { displayName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("שם תצוגה") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        Pressable(
+                            onClick = { if (displayName.isNotBlank()) onUpdateName(displayName.trim()) },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = true,
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.CheckCircle, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("שמירת השם", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(44.dp).clip(CircleShape).background(StudyBlue.copy(.14f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Psychology, null, tint = StudyBlue)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("הזיכרונות של פיתי", style = MaterialTheme.typography.titleLarge)
+                                Text("עובדות שפיתי תזכור ותשתמש בהן בשיחות הבאות", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (state.pythiMemories.isEmpty()) {
+                            Text(
+                                "עדיין אין זיכרונות. אפשר להוסיף העדפות למידה, נושאים חשובים או כל פרט שיעזור לפיתי.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            state.pythiMemories.forEach { (title, details) ->
+                                GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(title, fontWeight = FontWeight.Bold)
+                                            if (details.isNotBlank()) {
+                                                Spacer(Modifier.height(3.dp))
+                                                Text(details, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                        TextButton(onClick = { onRemoveMemory(title) }) {
+                                            Text("מחיקה", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(.45f))
+                        Text("זיכרון חדש", fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = memoryTitle,
+                            onValueChange = { memoryTitle = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("כותרת קצרה") },
+                            placeholder = { Text("לדוגמה: איך נוח לי ללמוד") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        OutlinedTextField(
+                            value = memoryDetails,
+                            onValueChange = { memoryDetails = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("מה פיתי צריכה לזכור?") },
+                            minLines = 2,
+                            maxLines = 4,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        Pressable(
+                            onClick = {
+                                if (memoryTitle.isNotBlank() && memoryDetails.isNotBlank()) {
+                                    onSaveMemory(memoryTitle.trim(), memoryDetails.trim())
+                                    memoryTitle = ""
+                                    memoryDetails = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = memoryTitle.isNotBlank() && memoryDetails.isNotBlank(),
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.Add, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("הוספה לזיכרונות", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            item {
+                GlassSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Key, null, tint = StudyBlue)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("סיסמה ואבטחה", style = MaterialTheme.typography.titleLarge)
+                                Text("עדכון סיסמת החשבון", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (state.user?.isGoogle != true) {
+                            OutlinedTextField(
+                                oldPassword,
+                                { oldPassword = it; passwordMessage = null },
+                                Modifier.fillMaxWidth(),
+                                label = { Text("סיסמה נוכחית") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                        } else {
+                            Text(
+                                "אפשר להגדיר סיסמה לחשבון Google גם בלי סיסמה נוכחית.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        OutlinedTextField(
+                            newPassword,
+                            { newPassword = it; passwordMessage = null },
+                            Modifier.fillMaxWidth(),
+                            label = { Text("סיסמה חדשה") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        OutlinedTextField(
+                            confirmPassword,
+                            { confirmPassword = it; passwordMessage = null },
+                            Modifier.fillMaxWidth(),
+                            label = { Text("אימות סיסמה חדשה") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            isError = passwordMessage != null,
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        passwordMessage?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Pressable(
+                            onClick = {
+                                passwordMessage = when {
+                                    state.user?.isGoogle != true && oldPassword.isBlank() -> "צריך להזין את הסיסמה הנוכחית"
+                                    newPassword.length < 8 -> "הסיסמה החדשה חייבת להכיל לפחות 8 תווים"
+                                    newPassword != confirmPassword -> "הסיסמאות החדשות אינן תואמות"
+                                    else -> {
+                                        onChangePassword(oldPassword, newPassword)
+                                        oldPassword = ""
+                                        newPassword = ""
+                                        confirmPassword = ""
+                                        null
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = true,
+                            contentPadding = 13.dp
+                        ) {
+                            Icon(Icons.Rounded.Lock, null, tint = StudyBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text("עדכון סיסמה", color = StudyBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
@@ -801,41 +1104,6 @@ fun ProfileScreen(
                 }
             }
         }
-        item {
-            SettingsGroup("ערכת צבעים", Icons.Rounded.Palette) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        Triple(ThemeMode.SYSTEM, "מערכת", Icons.Rounded.Settings),
-                        Triple(ThemeMode.LIGHT, "בהיר", Icons.Rounded.LightMode),
-                        Triple(ThemeMode.DARK, "כהה", Icons.Rounded.DarkMode)
-                    ).forEach { option ->
-                        Pressable(
-                            onClick = { onTheme(option.first) },
-                            selected = state.settings.themeMode == option.first,
-                            modifier = Modifier.weight(1f),
-                            contentPadding = 10.dp
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(option.third, null, tint = if (state.settings.themeMode == option.first) StudyBlue else MaterialTheme.colorScheme.onSurface)
-                                Text(option.second, style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            SettingsGroup("נגישות ותנועה", Icons.Rounded.AutoAwesome) {
-                ToggleSetting("הפחתת תנועה", "מעדן מעברים ואפקטי spring", state.settings.reduceMotion, onReduceMotion)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ToggleSetting("משוב רטט", "רטט עדין בפעולות", state.settings.haptics, onHaptics)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ToggleSetting("השארת המסך דולק", "שימושי בזמן פתרון תרגילים", state.settings.keepScreenOn, onKeepScreenOn)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Text("גודל טקסט", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-                Slider(value = state.settings.fontScale, onValueChange = onFontScale, valueRange = .85f..1.35f)
-            }
-        }
         if (state.user != null) {
             item {
                 Pressable(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
@@ -847,7 +1115,7 @@ fun ProfileScreen(
         }
         item {
             Text(
-                "StudyZone Android · ${BuildConfig.VERSION_NAME}\nNative Kotlin + Jetpack Compose",
+                "StudyZone · ${BuildConfig.VERSION_NAME}",
                 modifier = Modifier.fillMaxWidth().padding(20.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -858,15 +1126,204 @@ fun ProfileScreen(
 }
 
 @Composable
-private fun SettingsGroup(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
-    GlassSurface(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = StudyBlue)
-                Spacer(Modifier.width(10.dp))
-                Text(title, style = MaterialTheme.typography.titleLarge)
+fun SettingsScreen(
+    state: UiState,
+    onTheme: (ThemeMode, Offset) -> Unit,
+    onReduceMotion: (Boolean) -> Unit,
+    onHaptics: (Boolean) -> Unit,
+    onFontScale: (Float) -> Unit,
+    onKeepScreenOn: (Boolean) -> Unit,
+    onPersistChatHistory: (Boolean) -> Unit,
+    onRememberPosition: (Boolean) -> Unit,
+    onReadingProgress: (Boolean) -> Unit,
+    onGreenChecks: (Boolean) -> Unit,
+    onActionSuggestions: (Boolean) -> Unit,
+    onPromptNavigator: (Boolean) -> Unit,
+    onAskPopover: (Boolean) -> Unit,
+    onClearSelection: (Boolean) -> Unit,
+    onSystemNotifications: (Boolean) -> Unit,
+    onLoginNotifications: (Boolean) -> Unit,
+    onPasswordNotifications: (Boolean) -> Unit,
+    onLineSpacing: (Float) -> Unit,
+    onSelectionHighlight: (String) -> Unit,
+    onActiveTheme: (String) -> Unit,
+    onSaveApiKeys: (List<String>) -> Unit
+) {
+    var newApiKey by remember { mutableStateOf("") }
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 132.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(34.dp), selected = true) {
+                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(54.dp).clip(RoundedCornerShape(18.dp)).background(StudyBlue),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Rounded.Settings, null, tint = Color.White, modifier = Modifier.size(27.dp)) }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text("הגדרות", style = MaterialTheme.typography.headlineLarge)
+                        Text("המראה והלמידה שלך, במקום אחד", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
-            Spacer(Modifier.height(14.dp))
+        }
+        item {
+            SettingsGroup("מראה וקריאות", Icons.Rounded.Palette) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        Triple(ThemeMode.SYSTEM, "מערכת", Icons.Rounded.Settings),
+                        Triple(ThemeMode.LIGHT, "בהיר", Icons.Rounded.LightMode),
+                        Triple(ThemeMode.DARK, "כהה", Icons.Rounded.DarkMode)
+                    ).forEach { option ->
+                        var optionCenter by remember(option.first) { mutableStateOf(Offset.Zero) }
+                        Pressable(
+                            onClick = { onTheme(option.first, optionCenter) },
+                            selected = state.settings.themeMode == option.first,
+                            modifier = Modifier.weight(1f).onGloballyPositioned { coordinates ->
+                                val topLeft = coordinates.positionInRoot()
+                                optionCenter = topLeft + Offset(coordinates.size.width / 2f, coordinates.size.height / 2f)
+                            },
+                            contentPadding = 9.dp
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(option.third, null, tint = if (state.settings.themeMode == option.first) StudyBlue else MaterialTheme.colorScheme.onSurface)
+                                Text(option.second, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+                Text("גודל טקסט", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+                Slider(value = state.settings.fontScale, onValueChange = onFontScale, valueRange = .85f..1.35f)
+                Text("מרווח שורות", fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(1f to "רגיל", 1.16f to "מרווח", 1.3f to "רחב").forEach { option ->
+                        Pressable(
+                            onClick = { onLineSpacing(option.first) },
+                            selected = kotlin.math.abs(state.settings.lineSpacing - option.first) < .05f,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = 8.dp
+                        ) { Text(option.second, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+                Text("ערכת צבעים", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("default" to "קלאסי", "midnight" to "חצות", "ocean" to "אוקיינוס", "forest" to "יער", "sunset" to "שקיעה", "rose" to "ורד", "gold" to "זהב")) { theme ->
+                        Pressable(onClick = { onActiveTheme(theme.first) }, selected = state.settings.activeThemeId == theme.first, contentPadding = 9.dp) {
+                            Text(theme.second, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                Text("צבע סימון טקסט", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    items(listOf("default", "sunset", "mint", "sky", "butter", "lavender", "teal", "peach", "rose")) { color ->
+                        Pressable(onClick = { onSelectionHighlight(color) }, selected = state.settings.selectionHighlight == color, contentPadding = 9.dp) {
+                            Text(if (color == "default") "ברירת מחדל" else color, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            SettingsGroup("למידה", Icons.Rounded.School) {
+                ToggleSetting("זכירת מיקום גלילה", "חזרה למקום האחרון בקורס", state.settings.rememberPosition, onRememberPosition)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("מד התקדמות קריאה", "פס התקדמות בראש השיעור", state.settings.showReadingProgress, onReadingProgress)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("סימון וי ירוק", "סימון שיעורים שהושלמו", state.settings.showGreenChecks, onGreenChecks)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("השארת המסך פעיל", "מונע כיבוי בזמן קריאה", state.settings.keepScreenOn, onKeepScreenOn)
+            }
+        }
+        item {
+            SettingsGroup("פיתי וצ׳אט", Icons.Rounded.ChatBubbleOutline) {
+                ToggleSetting("שמירת היסטוריית צ׳אט", "השיחה תישמר בין פתיחות", state.settings.persistChatHistory, onPersistChatHistory)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("הצעות לפעולה", "כפתורי תגובה, תרגול ובחנים", state.settings.showActionSuggestions, onActionSuggestions)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("פורמטים בשיחה", "סרגל פורמטים בצד הצ׳אט", state.settings.showChatPromptNavigator, onPromptNavigator)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("שאל את פיתי על טקסט", "פעולות מהירות לאחר סימון טקסט", state.settings.enableAskPopover, onAskPopover)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("ניקוי סימון אוטומטי", "ביטול הסימון לאחר פתיחת הפעולה", state.settings.clearSelectionAfterPopover, onClearSelection)
+            }
+        }
+        item {
+            SettingsGroup("התראות", Icons.Rounded.NotificationsNone) {
+                ToggleSetting("התראות מערכת", "הרשאת Android להתראות חשובות", state.settings.systemNotifications, onSystemNotifications)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("מייל בעת התחברות", "התראה על כניסה לחשבון", state.settings.emailLoginNotifications, onLoginNotifications)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("מייל כשסיסמה משתנה", "התראה לאחר עדכון סיסמה", state.settings.emailPasswordNotifications, onPasswordNotifications)
+            }
+        }
+        item {
+            SettingsGroup("תנועה ומגע", Icons.Rounded.AutoAwesome) {
+                ToggleSetting("הפחתת תנועה", "ביטול springs והברקות לא חיוניות", state.settings.reduceMotion, onReduceMotion)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleSetting("משוב רטט", "רטט עדין בניווט ובפעולות", state.settings.haptics, onHaptics)
+            }
+        }
+        item {
+            SettingsGroup("מפתחות API", Icons.Rounded.Key) {
+                if (state.user == null) {
+                    Text("יש להתחבר כדי לנהל מפתחות Gemini אישיים.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text("המפתחות נשמרים ומסונכרנים דרך החשבון.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    state.userApiKeys.forEachIndexed { index, _ ->
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("••••••••••••  #${index + 1}", modifier = Modifier.weight(1f))
+                            TextButton(onClick = { onSaveApiKeys(state.userApiKeys.filterIndexed { keyIndex, _ -> keyIndex != index }) }) { Text("מחיקה") }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = newApiKey,
+                        onValueChange = { newApiKey = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        label = { Text("מפתח Gemini חדש") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        trailingIcon = { Icon(Icons.Rounded.Key, null) },
+                        shape = RoundedCornerShape(18.dp)
+                    )
+                    Pressable(
+                        onClick = {
+                            val key = newApiKey.trim()
+                            if (key.isNotBlank()) {
+                                onSaveApiKeys(state.userApiKeys + key)
+                                newApiKey = ""
+                            }
+                        },
+                        enabled = newApiKey.isNotBlank() && !state.apiKeysLoading,
+                        selected = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    ) {
+                        if (state.apiKeysLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Add, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("הוספת מפתח")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
+    GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Row(Modifier.padding(horizontal = 7.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(StudyBlue.copy(alpha = .14f)),
+                    contentAlignment = Alignment.Center
+                ) { Icon(icon, null, tint = StudyBlue, modifier = Modifier.size(21.dp)) }
+                Spacer(Modifier.width(11.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(7.dp))
             content()
         }
     }
@@ -874,12 +1331,25 @@ private fun SettingsGroup(title: String, icon: ImageVector, content: @Composable
 
 @Composable
 private fun ToggleSetting(title: String, subtitle: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).clickable { onChecked(!checked) }
+            .padding(horizontal = 8.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
-        Switch(checked = checked, onCheckedChange = onChecked)
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = StudyBlue,
+                uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        )
     }
 }
 

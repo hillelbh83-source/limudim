@@ -5,10 +5,12 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
@@ -128,7 +130,13 @@ private val BaseTypography = Typography(
 )
 
 @Composable
-fun StudyZoneTheme(themeMode: ThemeMode, fontScale: Float, content: @Composable () -> Unit) {
+fun StudyZoneTheme(
+    themeMode: ThemeMode,
+    fontScale: Float,
+    lineSpacing: Float = 1f,
+    activeThemeId: String = "default",
+    content: @Composable () -> Unit
+) {
     val dark = when (themeMode) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.DARK -> true
@@ -153,9 +161,22 @@ fun StudyZoneTheme(themeMode: ThemeMode, fontScale: Float, content: @Composable 
     }
 
     val safeScale = fontScale.coerceIn(.85f, 1.35f)
-    val typography = remember(safeScale) { BaseTypography.scaled(safeScale) }
+    val safeSpacing = lineSpacing.coerceIn(1f, 1.35f)
+    val typography = remember(safeScale, safeSpacing) { BaseTypography.scaled(safeScale, safeSpacing) }
+    val accent = remember(activeThemeId) {
+        when (activeThemeId) {
+            "midnight" -> Color(0xFF4F46AD)
+            "ocean" -> Color(0xFF0B7894)
+            "forest" -> Color(0xFF28734B)
+            "sunset" -> Color(0xFFBF5B2C)
+            "rose" -> Color(0xFFC83F6F)
+            "gold" -> Color(0xFFB8870B)
+            else -> StudyBlue
+        }
+    }
+    val colors = (if (dark) DarkColors else LightColors).copy(primary = accent, secondary = accent)
     MaterialTheme(
-        colorScheme = if (dark) DarkColors else LightColors,
+        colorScheme = colors,
         typography = typography,
         shapes = MaterialTheme.shapes.copy(
             extraSmall = RoundedCornerShape(10.dp),
@@ -164,23 +185,26 @@ fun StudyZoneTheme(themeMode: ThemeMode, fontScale: Float, content: @Composable 
             large = RoundedCornerShape(30.dp),
             extraLarge = RoundedCornerShape(36.dp)
         ),
-        content = content
-    )
+    ) {
+        // A Box does not provide a content colour. Supplying it once at the theme boundary keeps
+        // unstyled text and icons readable on every screen, including profile and course cards.
+        CompositionLocalProvider(LocalContentColor provides colors.onBackground, content = content)
+    }
 }
 
-private fun Typography.scaled(scale: Float) = copy(
-    displaySmall = displaySmall.scaled(scale),
-    headlineLarge = headlineLarge.scaled(scale),
-    headlineMedium = headlineMedium.scaled(scale),
-    titleLarge = titleLarge.scaled(scale),
-    titleMedium = titleMedium.scaled(scale),
-    bodyLarge = bodyLarge.scaled(scale),
-    bodyMedium = bodyMedium.scaled(scale),
-    labelLarge = labelLarge.scaled(scale),
-    labelMedium = labelMedium.scaled(scale)
+private fun Typography.scaled(scale: Float, spacing: Float) = copy(
+    displaySmall = displaySmall.scaled(scale, spacing),
+    headlineLarge = headlineLarge.scaled(scale, spacing),
+    headlineMedium = headlineMedium.scaled(scale, spacing),
+    titleLarge = titleLarge.scaled(scale, spacing),
+    titleMedium = titleMedium.scaled(scale, spacing),
+    bodyLarge = bodyLarge.scaled(scale, spacing),
+    bodyMedium = bodyMedium.scaled(scale, spacing),
+    labelLarge = labelLarge.scaled(scale, spacing),
+    labelMedium = labelMedium.scaled(scale, spacing)
 )
 
-private fun TextStyle.scaled(scale: Float) = copy(
+private fun TextStyle.scaled(scale: Float, spacing: Float) = copy(
     fontSize = fontSize * scale,
-    lineHeight = lineHeight * scale
+    lineHeight = lineHeight * scale * spacing
 )

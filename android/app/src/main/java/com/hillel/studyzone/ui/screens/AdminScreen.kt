@@ -127,7 +127,7 @@ fun AdminScreen(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("מרכז ניהול", style = MaterialTheme.typography.headlineMedium)
-                Text("כל יכולות הניהול של האתר", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("כל יכולות הניהול של האפליקציה", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             RoundActionButton(Icons.Rounded.Refresh, "רענון", onReload, size = 46.dp)
         }

@@ -8,9 +8,9 @@ plugins {
 val studyZoneApiUrl = providers.gradleProperty("STUDYZONE_API_URL")
     .orElse(providers.environmentVariable("STUDYZONE_API_URL"))
     .getOrElse("https://studyzone-cpav.onrender.com")
-val studyZoneWebUrl = providers.gradleProperty("STUDYZONE_WEB_URL")
-    .orElse(providers.environmentVariable("STUDYZONE_WEB_URL"))
-    .getOrElse("https://studyzone-1-yhnz.onrender.com")
+val googleWebClientId = providers.gradleProperty("GOOGLE_WEB_CLIENT_ID")
+    .orElse(providers.environmentVariable("GOOGLE_WEB_CLIENT_ID"))
+    .getOrElse("126122580284-a7rlabpvmfumcsopjt2v97eci8det4jp.apps.googleusercontent.com")
 
 android {
     namespace = "com.hillel.studyzone"
@@ -20,19 +20,15 @@ android {
         applicationId = "com.hillel.studyzone"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.1.0"
+        versionCode = 15
+        versionName = "2.9.1"
 
         buildConfigField(
             "String",
             "API_BASE_URL",
             "\"$studyZoneApiUrl\""
         )
-        buildConfigField(
-            "String",
-            "WEB_BASE_URL",
-            "\"$studyZoneWebUrl\""
-        )
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
     }
 
     buildFeatures {
@@ -78,11 +74,19 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
+    // Lint's Activity Result detector requires an explicit modern Fragment artifact even though
+    // this Compose-only app hosts no fragments. Keep it aligned with the current stable release.
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")
     implementation("androidx.datastore:datastore-preferences:1.2.0")
     implementation("androidx.core:core-splashscreen:1.2.0")
+    implementation("androidx.webkit:webkit:1.16.0")
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
+    implementation("com.google.android.gms:play-services-auth:21.6.0")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

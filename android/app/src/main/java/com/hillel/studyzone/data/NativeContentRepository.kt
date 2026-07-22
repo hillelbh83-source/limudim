@@ -6,8 +6,6 @@ import com.hillel.studyzone.model.Course
 import com.hillel.studyzone.model.Lesson
 import com.hillel.studyzone.model.SearchResult
 import com.hillel.studyzone.model.Section
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -22,9 +20,7 @@ import java.util.LinkedHashMap
  * first screen available without waiting for a Render cold start.
  */
 internal class NativeContentRepository(
-    context: Context,
-    private val client: OkHttpClient,
-    private val webRoot: String
+    context: Context
 ) {
     private val appContext = context.applicationContext
     // A full-text search can touch every course. Keep only the most recently
@@ -66,7 +62,7 @@ internal class NativeContentRepository(
             sectionId = section.id,
             title = section.title.ifBlank { "סעיף ${section.id}" },
             content = normalized,
-            interactiveUrl = "$webRoot/#${course.id}/${chapter.id}/${section.id}",
+            interactiveUrl = "",
             previousSectionId = flattened.getOrNull(selectedIndex - 1)?.second?.id,
             nextSectionId = flattened.getOrNull(selectedIndex + 1)?.second?.id
         )
@@ -150,33 +146,8 @@ internal class NativeContentRepository(
         return results
     }
 
-    /** Best-effort refresh. The bundled copy remains the immediate/offline path. */
-    fun refreshCourseIndex(courseId: String): Boolean {
-        val directory = indexDirectory(courseId)
-        val request = Request.Builder()
-            .url("$webRoot/search-index/$directory.json")
-            .header("Accept", "application/json")
-            .get()
-            .build()
-        return runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use false
-                val raw = response.body?.string().orEmpty()
-                if (raw.isBlank()) return@use false
-                val parsed = JSONObject(raw)
-                if (parsed.length() == 0) return@use false
-                val target = cacheFile(directory)
-                val temporary = File(target.parentFile, "${target.name}.tmp")
-                temporary.writeText(raw, Charsets.UTF_8)
-                if (!temporary.renameTo(target)) {
-                    target.writeText(raw, Charsets.UTF_8)
-                    temporary.delete()
-                }
-                memoryIndexes[directory] = parsed
-                true
-            }
-        }.getOrDefault(false)
-    }
+    /** Course content is APK-owned; it is never refreshed from a frontend host. */
+    fun refreshCourseIndex(@Suppress("UNUSED_PARAMETER") courseId: String): Boolean = false
 
     private fun loadIndex(courseId: String): JSONObject? {
         val directory = indexDirectory(courseId)

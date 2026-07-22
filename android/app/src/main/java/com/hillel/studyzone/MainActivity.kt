@@ -1,7 +1,12 @@
 package com.hillel.studyzone
 
 import android.content.Intent
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -10,6 +15,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -33,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -41,7 +52,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.unit.LayoutDirection.Rtl
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
 import com.hillel.studyzone.ui.screens.AdminScreen
@@ -56,13 +74,48 @@ import com.hillel.studyzone.ui.screens.LessonScreen
 import com.hillel.studyzone.ui.screens.ProfileScreen
 import com.hillel.studyzone.ui.screens.SavedScreen
 import com.hillel.studyzone.ui.screens.SearchScreen
+import com.hillel.studyzone.ui.screens.SettingsScreen
 import com.hillel.studyzone.ui.components.LocalHapticsEnabled
 import com.hillel.studyzone.ui.theme.StudyZoneTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
     private var activeIntent by mutableStateOf<Intent?>(null)
+    private val chatFilesLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        viewModel.addChatAttachments(uris)
+    }
+    private val profilePhotoLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let(viewModel::updateProfilePhoto)
+    }
+    private val speechLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val text = if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+        } else ""
+        if (text.isNotBlank()) {
+            viewModel.setChatInput(text)
+        }
+    }
+    private val legacyGoogleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        runCatching {
+            GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(ApiException::class.java)
+                .idToken
+                .orEmpty()
+                .ifBlank { error("Google לא החזירה אסימון התחברות") }
+        }.onSuccess(viewModel::loginWithGoogle)
+            .onFailure { error ->
+                viewModel.showMessage(
+                    if (error is ApiException && error.statusCode == 10) {
+                        "Google OAuth חסום: יש לרשום com.hillel.studyzone עם חתימת SHA-1 של ה-APK ב-Google Auth Platform"
+                    } else {
+                        "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "בדקו את הגדרת OAuth של האפליקציה" }}"
+                    }
+                )
+            }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -84,7 +137,12 @@ class MainActivity : ComponentActivity() {
             // A single collected snapshot drives both the theme and the screen. Keeping these in
             // the same composition frame prevents the icon from changing before the palette.
             val state by viewModel.state.collectAsStateWithLifecycle()
-            StudyZoneTheme(state.settings.themeMode, state.settings.fontScale) {
+            StudyZoneTheme(
+                state.settings.themeMode,
+                state.settings.fontScale,
+                state.settings.lineSpacing,
+                state.settings.activeThemeId
+            ) {
                 CompositionLocalProvider(
                     androidx.compose.ui.platform.LocalLayoutDirection provides Rtl,
                     LocalHapticsEnabled provides state.settings.haptics
@@ -100,6 +158,67 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         activeIntent = intent
     }
+
+    fun launchGoogleSignIn() {
+        lifecycleScope.launch {
+            runCatching {
+                // Request all accounts explicitly. The dedicated button option is reported as a
+                // cancellation on some Play Services/device combinations before its UI opens.
+                val option = GetGoogleIdOption.Builder()
+                    .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .setFilterByAuthorizedAccounts(false)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val credential = CredentialManager.create(this@MainActivity).getCredential(
+                    context = this@MainActivity,
+                    request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+                ).credential
+                if (credential !is CustomCredential || credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    error("Google לא החזירה פרטי התחברות תקינים")
+                }
+                GoogleIdTokenCredential.createFrom(credential.data).idToken
+            }.onSuccess(viewModel::loginWithGoogle)
+                .onFailure { error ->
+                    if (error is GetCredentialCancellationException || error is NoCredentialException) {
+                        launchLegacyGoogleSignIn()
+                        return@onFailure
+                    }
+                    viewModel.showMessage(
+                        when {
+                            error.javaClass.simpleName.contains("Configuration", ignoreCase = true) ->
+                                "Google עדיין לא מזהה את חתימת האפליקציה. יש לעדכן את SHA-1 ב-Google Auth Platform"
+                            else -> "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}"
+                        }
+                    )
+                }
+        }
+    }
+
+    private fun launchLegacyGoogleSignIn() {
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestIdToken(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+            .build()
+        legacyGoogleLauncher.launch(GoogleSignIn.getClient(this, options).signInIntent)
+    }
+
+    fun launchChatAttachmentPicker() {
+        chatFilesLauncher.launch(arrayOf("image/*", "application/pdf", "text/plain"))
+    }
+
+    fun launchProfilePhotoPicker() {
+        profilePhotoLauncher.launch("image/*")
+    }
+
+    fun launchVoiceInput() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("he", "IL").toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "דברו עם פיתי")
+        }
+        runCatching { speechLauncher.launch(intent) }
+            .onFailure { viewModel.showMessage("הכתבה קולית אינה זמינה במכשיר הזה") }
+    }
 }
 
 @Composable
@@ -114,6 +233,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
     var introVisible by rememberSaveable { mutableStateOf(true) }
     var handledDeepLink by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingAdminExport by remember { mutableStateOf<String?>(null) }
+    var themeRevealOrigin by remember { mutableStateOf(Offset(82f, 56f)) }
     val adminExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -125,6 +245,9 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
         }
         pendingAdminExport = null
         viewModel.consumeAdminExport()
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) viewModel.setSystemNotifications(false)
     }
 
     LaunchedEffect(Unit) {
@@ -198,12 +321,13 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onBookmark = viewModel::toggleBookmark,
                 onCompleted = viewModel::toggleCompleted,
                 onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
-                onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) }
+                onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) },
+                onAskSelection = viewModel::askPythiAboutSelection
             )
             selectedCourse != null -> CourseDetailScreen(
                 state = state,
                 onBack = viewModel::closeCourse,
-                onLesson = { viewModel.openLesson(selectedCourse.id, it) },
+                onLesson = { sectionId -> viewModel.openLesson(selectedCourse.id, sectionId) },
                 onRequestAccess = { viewModel.requestCourseAccess(selectedCourse.id) }
             )
             else -> AnimatedContent(targetState = state.rootTab, label = "rootTab") { tab ->
@@ -213,30 +337,62 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                         onCourse = viewModel::openCourse,
                         onProfile = { viewModel.selectTab(RootTab.PROFILE) },
                         darkMode = resolvedDark,
-                        onThemeToggle = {
+                        onThemeToggle = { origin ->
+                            themeRevealOrigin = origin
                             // SYSTEM means the current phone palette, so the first tap must always
                             // create a visible change instead of merely replacing SYSTEM with DARK.
                             viewModel.setTheme(if (resolvedDark) ThemeMode.LIGHT else ThemeMode.DARK)
                         }
                     )
                     RootTab.SEARCH -> SearchScreen(state, viewModel::setSearchQuery, viewModel::openLesson)
-                    RootTab.SAVED -> SavedScreen(state, viewModel::openLesson)
                     RootTab.PROFILE -> ProfileScreen(
                         state,
                         onAuth = { viewModel.setAuthOpen(true) },
                         onLogout = viewModel::logout,
                         onAdmin = viewModel::openAdmin,
-                        onTheme = viewModel::setTheme,
+                        onSaveMemory = viewModel::savePythiMemory,
+                        onRemoveMemory = viewModel::removePythiMemory,
+                        onUpdateName = viewModel::updateProfileName,
+                        onUpdatePhoto = { (context as? MainActivity)?.launchProfilePhotoPicker() },
+                        onSendAdminMessage = viewModel::sendAdminMessage,
+                        onChangePassword = viewModel::changePassword
+                    )
+                    RootTab.SETTINGS -> SettingsScreen(
+                        state = state,
+                        onTheme = { mode, origin ->
+                            themeRevealOrigin = origin
+                            viewModel.setTheme(mode)
+                        },
                         onReduceMotion = viewModel::setReduceMotion,
                         onHaptics = viewModel::setHaptics,
                         onFontScale = viewModel::setFontScale,
-                        onKeepScreenOn = viewModel::setKeepScreenOn
+                        onKeepScreenOn = viewModel::setKeepScreenOn,
+                        onPersistChatHistory = viewModel::setPersistChatHistory,
+                        onRememberPosition = viewModel::setRememberPosition,
+                        onReadingProgress = viewModel::setShowReadingProgress,
+                        onGreenChecks = viewModel::setShowGreenChecks,
+                        onActionSuggestions = viewModel::setShowActionSuggestions,
+                        onPromptNavigator = viewModel::setShowChatPromptNavigator,
+                        onAskPopover = viewModel::setEnableAskPopover,
+                        onClearSelection = viewModel::setClearSelectionAfterPopover,
+                        onSystemNotifications = { enabled ->
+                            viewModel.setSystemNotifications(enabled)
+                            if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        },
+                        onLoginNotifications = viewModel::setEmailLoginNotifications,
+                        onPasswordNotifications = viewModel::setEmailPasswordNotifications,
+                        onLineSpacing = viewModel::setLineSpacing,
+                        onSelectionHighlight = viewModel::setSelectionHighlight,
+                        onActiveTheme = viewModel::setActiveTheme,
+                        onSaveApiKeys = viewModel::saveUserApiKeys
                     )
                 }
             }
         }
 
-        if (state.lesson == null && !state.lessonLoading && !state.adminOpen && !state.chatOpen) {
+        if (selectedCourse == null && state.lesson == null && !state.lessonLoading && !state.adminOpen) {
             BottomGlassNav(
                 active = state.rootTab,
                 onTab = viewModel::selectTab,
@@ -250,14 +406,16 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onOpen = viewModel::setChatOpen,
                 onExpanded = viewModel::setChatExpanded,
                 onInput = viewModel::setChatInput,
+                onAttach = { (context as? MainActivity)?.launchChatAttachmentPicker() },
+                onRemoveAttachment = viewModel::removeChatAttachment,
+                onVoice = { (context as? MainActivity)?.launchVoiceInput() },
                 onSend = viewModel::sendChat,
                 onStop = viewModel::stopChat,
                 onClear = viewModel::clearChat,
-                modifier = if (state.chatOpen) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = if (state.lesson == null) 100.dp else 94.dp)
-                }
+                onClearReply = viewModel::clearChatReplyContext,
+                onEditMessage = viewModel::editChatMessage,
+                onRetryMessage = viewModel::retryChatMessage,
+                modifier = Modifier.fillMaxSize()
             )
         }
 
@@ -266,7 +424,8 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
             loading = state.authLoading,
             onDismiss = { viewModel.setAuthOpen(false) },
             onLogin = viewModel::login,
-            onRegister = viewModel::register
+            onRegister = viewModel::register,
+            onGoogleLogin = { (context as? MainActivity)?.launchGoogleSignIn() }
         )
 
         AnimatedVisibility(state.adminOpen, enter = fadeIn() + scaleIn(initialScale = .96f), exit = fadeOut() + scaleOut(targetScale = .96f)) {
@@ -304,7 +463,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
         }
 
         IntroSplash(introVisible)
-        if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background)
+        if (!introVisible) ThemeRevealOverlay(MaterialTheme.colorScheme.background, themeRevealOrigin)
     }
 }
 
