@@ -13,6 +13,8 @@ import androidx.activity.viewModels
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -46,7 +48,7 @@ import androidx.compose.ui.unit.LayoutDirection.Rtl
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
@@ -112,17 +114,18 @@ class MainActivity : ComponentActivity() {
     fun launchGoogleSignIn() {
         lifecycleScope.launch {
             runCatching {
-                val googleOption = GetGoogleIdOption.Builder()
-                    .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
-                    .setFilterByAuthorizedAccounts(false)
-                    .setAutoSelectEnabled(false)
-                    .build()
-                val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleOption)
-                    .build()
-                val credential = CredentialManager.create(this@MainActivity)
-                    .getCredential(this@MainActivity, request)
-                    .credential
+                val manager = CredentialManager.create(this@MainActivity)
+                // This flow is launched by an explicit Google button, so use Google's dedicated
+                // SiWG option. GetGoogleIdOption is intended for the general credential sheet and
+                // can reject an otherwise valid explicit sign-in request on some providers.
+                val credential = manager.getCredential(
+                    this@MainActivity,
+                    GetCredentialRequest.Builder()
+                        .addCredentialOption(
+                            GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
+                        )
+                        .build()
+                ).credential
                 if (
                     credential !is CustomCredential ||
                     credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -131,7 +134,16 @@ class MainActivity : ComponentActivity() {
                 }
                 GoogleIdTokenCredential.createFrom(credential.data).idToken
             }.onSuccess(viewModel::loginWithGoogle)
-                .onFailure { viewModel.showMessage("ההתחברות עם Google בוטלה או נכשלה") }
+                .onFailure { error ->
+                    val message = when {
+                        error is GetCredentialCancellationException -> "ההתחברות עם Google בוטלה"
+                        error is NoCredentialException -> "לא נמצא חשבון Google זמין במכשיר"
+                        error.javaClass.simpleName.contains("Configuration", ignoreCase = true) ->
+                            "הגדרת Google של האפליקציה אינה תקינה. עדכנו את חתימת האפליקציה ונסו שוב"
+                        else -> "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}"
+                    }
+                    viewModel.showMessage(message)
+                }
         }
     }
 }
@@ -228,6 +240,7 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
             state.error != null && state.courses.isEmpty() -> ErrorState(state.error.orEmpty(), viewModel::bootstrap)
             selectedCourse != null -> LocalCourseWebView(
                 courseId = selectedCourse.id,
+                darkMode = resolvedDark,
                 onBack = viewModel::closeCourse
             )
             state.lesson != null || state.lessonLoading -> LessonScreen(

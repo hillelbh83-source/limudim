@@ -1,5 +1,9 @@
 # StudyZone for Android
 
+Repository: https://github.com/hillelbh83-source/limudim
+
+GitHub Actions: https://github.com/hillelbh83-source/limudim/actions
+
 האפליקציה עצמה היא אפליקציית Kotlin + Compose מקומית. מסכי הבית, כרטיסי הקורסים,
 החיפוש, הפרופיל, ההגדרות, ההתחברות ופיתי אינם React ואינם WebView. רק לאחר פתיחת
 קורס מופעל renderer מקומי ייעודי של תוכן השיעורים והבחנים מתוך ה־APK.

@@ -173,6 +173,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 courses = resolvedCourses,
                 selectedCourse = selectedId?.let { id -> resolvedCourses.firstOrNull { course -> course.id == id } },
                 user = resolvedUser,
+                courseAccessLoaded = payload.courseAccess.loaded,
+                courseAccessAll = payload.courseAccess.allCourses,
+                accessibleCourseIds = payload.courseAccess.allowedCourseIds,
+                publicAccessCourseIds = payload.courseAccess.publicCourseIds,
+                pendingCourseIds = payload.courseAccess.pendingCourseIds,
+                deniedCourseIds = payload.courseAccess.deniedCourseIds,
                 completedSections = resolvedCompleted,
                 bookmarkedSections = resolvedBookmarks,
                 error = null
@@ -200,6 +206,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun openCourse(course: Course) {
         cancelLessonRequest()
         val currentCourse = mutableState.value.courses.firstOrNull { it.id == course.id } ?: course
+        val snapshot = mutableState.value
+        val normalizedId = currentCourse.id.lowercase()
+        val mayOpen = currentCourse.isAvailable && snapshot.courseAccessLoaded &&
+            (snapshot.courseAccessAll || normalizedId in snapshot.accessibleCourseIds)
+        if (!mayOpen) {
+            mutableState.update {
+                when {
+                    !currentCourse.isAvailable -> it.copy(toast = "הקורס עדיין בפיתוח")
+                    it.user == null -> it.copy(authOpen = true, toast = "יש להתחבר כדי לגשת לקורס הזה")
+                    normalizedId in it.pendingCourseIds -> it.copy(toast = "בקשת הגישה לקורס עדיין ממתינה")
+                    normalizedId in it.deniedCourseIds -> it.copy(toast = "בקשת הגישה לקורס לא אושרה")
+                    else -> it.copy(toast = "אין לחשבון גישה לקורס הזה")
+                }
+            }
+            return
+        }
         mutableState.update {
             it.copy(
                 selectedCourse = currentCourse,
@@ -217,6 +239,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openLesson(courseId: String, sectionId: String) {
         val course = mutableState.value.courses.firstOrNull { it.id == courseId } ?: return
+        val access = mutableState.value
+        val normalizedId = course.id.lowercase()
+        if (!course.isAvailable || !access.courseAccessLoaded ||
+            (!access.courseAccessAll && normalizedId !in access.accessibleCourseIds)
+        ) {
+            openCourse(course)
+            return
+        }
         if (mutableState.value.lesson?.let { it.courseId == courseId && it.sectionId == sectionId } == true) return
         cancelLessonRequest()
         val generation = lessonGeneration
@@ -378,6 +408,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             user = user,
                             completedSections = resolvedCompleted,
                             bookmarkedSections = resolvedBookmarks,
+                            courseAccessLoaded = account.courseAccess.loaded,
+                            courseAccessAll = account.courseAccess.allCourses,
+                            accessibleCourseIds = account.courseAccess.allowedCourseIds,
+                            publicAccessCourseIds = account.courseAccess.publicCourseIds,
+                            pendingCourseIds = account.courseAccess.pendingCourseIds,
+                            deniedCourseIds = account.courseAccess.deniedCourseIds,
                             authOpen = false,
                             authLoading = false,
                             toast = "ברוכים הבאים, ${user.displayName}"
@@ -434,6 +470,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             user = user,
                             completedSections = resolvedCompleted,
                             bookmarkedSections = resolvedBookmarks,
+                            courseAccessLoaded = account.courseAccess.loaded,
+                            courseAccessAll = account.courseAccess.allCourses,
+                            accessibleCourseIds = account.courseAccess.allowedCourseIds,
+                            publicAccessCourseIds = account.courseAccess.publicCourseIds,
+                            pendingCourseIds = account.courseAccess.pendingCourseIds,
+                            deniedCourseIds = account.courseAccess.deniedCourseIds,
                             authOpen = false,
                             authLoading = false,
                             toast = "ברוך שובך, ${user.displayName} 👋"
@@ -492,6 +534,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 user = null,
                 completedSections = emptySet(),
                 bookmarkedSections = emptySet(),
+                courseAccessLoaded = true,
+                courseAccessAll = false,
+                accessibleCourseIds = it.publicAccessCourseIds,
+                pendingCourseIds = emptySet(),
+                deniedCourseIds = emptySet(),
                 authOpen = false,
                 authLoading = false,
                 adminOpen = false,

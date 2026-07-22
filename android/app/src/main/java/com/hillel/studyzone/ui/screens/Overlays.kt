@@ -3,6 +3,7 @@ package com.hillel.studyzone.ui.screens
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.view.MotionEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
@@ -27,8 +28,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,6 +106,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -114,8 +114,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
@@ -257,6 +256,7 @@ fun ThemeRevealOverlay(background: Color) {
 }
 
 @Composable
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier = Modifier) {
     val tabs = remember {
         listOf(
@@ -268,7 +268,6 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
     }
     val activeIndex = tabs.indexOfFirst { it.first == active }.coerceAtLeast(0)
     val direction = LocalLayoutDirection.current
-    val density = LocalDensity.current
     var widthPx by remember { mutableIntStateOf(0) }
     var dragging by remember { mutableStateOf(false) }
     var pointerX by remember { mutableFloatStateOf(0f) }
@@ -288,7 +287,6 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         label = "navIndicator"
     )
     val indicatorX = if (dragging) dragX else animatedSnappedX
-    val indicatorWidth = with(density) { tabWidthPx.toDp() }
     GlassSurface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp).navigationBarsPadding(),
         shape = RoundedCornerShape(30.dp)
@@ -296,55 +294,55 @@ fun BottomGlassNav(active: RootTab, onTab: (RootTab) -> Unit, modifier: Modifier
         Box(
             Modifier.fillMaxWidth().padding(6.dp).height(58.dp)
                 .onSizeChanged { widthPx = it.width }
-                .pointerInput(widthPx, direction) {
-                    if (widthPx <= 0) return@pointerInput
+                .pointerInteropFilter { event ->
+                    if (widthPx <= 0) return@pointerInteropFilter false
                     fun logicalIndexAt(x: Float): Int {
                         val physical = (x / (widthPx.toFloat() / tabs.size)).toInt().coerceIn(0, tabs.lastIndex)
                         return if (direction == LayoutDirection.Rtl) tabs.lastIndex - physical else physical
                     }
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        dragging = true
-                        pointerX = down.position.x.coerceIn(0f, widthPx.toFloat())
-                        var finished = false
-                        while (!finished) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change == null) {
-                                visualIndex = activeIndex
-                                dragging = false
-                                finished = true
-                                continue
-                            }
-                            pointerX = change.position.x.coerceIn(0f, widthPx.toFloat())
-                            change.consume()
-                            if (!change.pressed) {
-                                if (event.type == PointerEventType.Release) {
-                                    val next = logicalIndexAt(pointerX)
-                                    visualIndex = next
-                                    dragging = false
-                                    onTab(tabs[next].first)
-                                } else {
-                                    visualIndex = activeIndex
-                                    dragging = false
-                                }
-                                finished = true
-                            }
+                    val x = event.x.coerceIn(0f, widthPx.toFloat())
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            pointerX = x
+                            visualIndex = logicalIndexAt(x)
+                            dragging = true
+                            true
                         }
+                        MotionEvent.ACTION_MOVE -> {
+                            pointerX = x
+                            visualIndex = logicalIndexAt(x)
+                            true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            pointerX = x
+                            val next = logicalIndexAt(x)
+                            visualIndex = next
+                            dragging = false
+                            onTab(tabs[next].first)
+                            true
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            visualIndex = activeIndex
+                            dragging = false
+                            true
+                        }
+                        else -> true
                     }
                 }
         ) {
-            if (indicatorWidth > 0.dp) {
-                Box(
-                    Modifier.width(indicatorWidth).height(58.dp)
-                        .graphicsLayer { translationX = indicatorX }
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(StudyBlue.copy(alpha = .15f))
-                )
+            Canvas(Modifier.fillMaxSize()) {
+                if (tabWidthPx > 0f) {
+                    drawRoundRect(
+                        color = StudyBlue.copy(alpha = .15f),
+                        topLeft = Offset(indicatorX, 0f),
+                        size = androidx.compose.ui.geometry.Size(tabWidthPx, size.height),
+                        cornerRadius = CornerRadius(22.dp.toPx(), 22.dp.toPx())
+                    )
+                }
             }
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceAround) {
                 tabs.forEach { item ->
-                    val selected = active == item.first
+                    val selected = visualIndex == tabs.indexOf(item)
                     val iconScale by animateFloatAsState(
                         if (selected) 1.08f else 1f,
                         spring(stiffness = 760f, dampingRatio = .7f),

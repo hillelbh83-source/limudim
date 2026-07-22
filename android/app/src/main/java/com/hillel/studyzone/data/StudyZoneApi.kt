@@ -66,7 +66,17 @@ class StudyZoneApi(context: Context) {
         val courses: List<Course>,
         val user: User?,
         val completedSections: Set<String>,
-        val bookmarkedSections: Set<String> = emptySet()
+        val bookmarkedSections: Set<String> = emptySet(),
+        val courseAccess: CourseAccess = CourseAccess()
+    )
+
+    data class CourseAccess(
+        val loaded: Boolean = false,
+        val allCourses: Boolean = false,
+        val allowedCourseIds: Set<String> = emptySet(),
+        val publicCourseIds: Set<String> = emptySet(),
+        val pendingCourseIds: Set<String> = emptySet(),
+        val deniedCourseIds: Set<String> = emptySet()
     )
 
     data class AccountSnapshot(
@@ -78,7 +88,8 @@ class StudyZoneApi(context: Context) {
     data class LoginResult(
         val user: User,
         val completedSections: Set<String>,
-        val bookmarkedSections: Set<String>
+        val bookmarkedSections: Set<String>,
+        val courseAccess: CourseAccess
     )
 
     data class AdminData(
@@ -107,6 +118,7 @@ class StudyZoneApi(context: Context) {
     /** Revalidates the cookie and merges the real profile/progress from the server. */
     suspend fun refreshBootstrap(): Bootstrap = withContext(Dispatchers.IO) {
         val account = refreshAccountInternal(null)
+        val courseAccess = loadCourseAccess(account.user)
         // The current production deployment returns 404 here. Running this only
         // after auth revalidation keeps it off the launch path while allowing a
         // newer server to replace bundled metadata without an app update.
@@ -117,7 +129,8 @@ class StudyZoneApi(context: Context) {
             courses = serverCourses.ifEmpty { content.bundledCourses },
             user = account.user,
             completedSections = account.completedSections,
-            bookmarkedSections = account.bookmarkedSections
+            bookmarkedSections = account.bookmarkedSections,
+            courseAccess = courseAccess
         )
     }
 
@@ -189,7 +202,35 @@ class StudyZoneApi(context: Context) {
             bookmarkedSections = if (sameCachedAccount) local.bookmarkedSections + remote.bookmarkedSections else remote.bookmarkedSections
         )
         if (generation == authGeneration.get()) cacheAccount(snapshot)
-        return LoginResult(user, snapshot.completedSections, snapshot.bookmarkedSections)
+        return LoginResult(user, snapshot.completedSections, snapshot.bookmarkedSections, loadCourseAccess(user))
+    }
+
+    private fun loadCourseAccess(user: User?): CourseAccess {
+        val publicIds = runCatching {
+            requestJson("/config").optJSONArray("publicCourseIds").toStringSet().normalizedIds()
+        }.getOrDefault(emptySet())
+        if (user == null) {
+            return CourseAccess(loaded = true, allowedCourseIds = publicIds, publicCourseIds = publicIds)
+        }
+        return runCatching {
+            val response = requestJson("/user/course-access")
+            val allCourses = response.opt("allowedCourseIds") is String &&
+                response.optString("allowedCourseIds") == "*"
+            val allowed = if (allCourses) emptySet() else {
+                response.optJSONArray("allowedCourseIds").toStringSet().normalizedIds()
+            }
+            val serverPublic = response.optJSONArray("publicCourseIds").toStringSet().normalizedIds()
+            CourseAccess(
+                loaded = true,
+                allCourses = allCourses || response.optBoolean("isAdmin"),
+                allowedCourseIds = allowed + serverPublic + publicIds,
+                publicCourseIds = serverPublic + publicIds,
+                pendingCourseIds = response.optJSONArray("pendingCourseIds").toStringSet().normalizedIds(),
+                deniedCourseIds = response.optJSONArray("deniedCourseIds").toStringSet().normalizedIds()
+            )
+        }.getOrElse {
+            CourseAccess(loaded = true, allowedCourseIds = publicIds, publicCourseIds = publicIds)
+        }
     }
 
     suspend fun register(email: String, password: String, displayName: String): String = withContext(Dispatchers.IO) {
@@ -1036,6 +1077,9 @@ private fun JSONArray?.toStringSet(): Set<String> = buildSet {
         array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
     }
 }
+
+private fun Set<String>.normalizedIds(): Set<String> =
+    mapTo(linkedSetOf()) { it.trim().lowercase() }.filterTo(linkedSetOf()) { it.isNotBlank() }
 
 private fun JSONArray?.toStringList(): List<String> = buildList {
     val array = this@toStringList ?: return@buildList

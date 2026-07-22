@@ -245,7 +245,24 @@ fun CoursesScreen(
                         enter = fadeIn() + slideInVertically(initialOffsetY = { it / 5 }) + scaleIn(initialScale = .97f),
                         exit = fadeOut() + scaleOut(targetScale = .97f)
                     ) {
-                        CourseCard(course, state.completedSections, onClick = { onCourse(course) })
+                        val courseId = course.id.lowercase()
+                        val accessGranted = course.isAvailable && state.courseAccessLoaded &&
+                            (state.courseAccessAll || courseId in state.accessibleCourseIds)
+                        val accessLabel = when {
+                            !course.isAvailable -> "בפיתוח"
+                            !state.courseAccessLoaded -> "בודק גישה"
+                            courseId in state.publicAccessCourseIds -> "ציבורי"
+                            accessGranted -> "פתוח"
+                            courseId in state.pendingCourseIds -> "ממתין"
+                            else -> "נעול"
+                        }
+                        CourseCard(
+                            course = course,
+                            completed = state.completedSections,
+                            accessGranted = accessGranted,
+                            accessLabel = accessLabel,
+                            onClick = { onCourse(course) }
+                        )
                     }
                 }
             }
@@ -255,7 +272,13 @@ fun CoursesScreen(
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Unit) {
+private fun CourseCard(
+    course: Course,
+    completed: Set<String>,
+    accessGranted: Boolean,
+    accessLabel: String,
+    onClick: () -> Unit
+) {
     val sectionCount = course.chapters.sumOf { it.sections.size }
     val completedCount = completed.count { it.startsWith("${course.id}/") }.coerceAtMost(sectionCount)
     val targetProgress = if (sectionCount == 0) 0f else completedCount.toFloat() / sectionCount
@@ -305,12 +328,12 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
                 }
                 Box(
                     Modifier.clip(CircleShape)
-                        .background(if (course.isAvailable) StudyBlue.copy(alpha = .12f) else MaterialTheme.colorScheme.surfaceVariant)
+                        .background(if (accessGranted) StudyBlue.copy(alpha = .12f) else MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 10.dp, vertical = 7.dp)
                 ) {
                     Text(
-                        if (course.isAvailable) "פתוח" else "בפיתוח",
-                        color = if (course.isAvailable) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                        accessLabel,
+                        color = if (accessGranted) StudyBlue else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
@@ -329,7 +352,7 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
-                        !course.isAvailable -> "פרטים ובקשת גישה"
+                        !accessGranted -> if (accessLabel == "בודק גישה") "טוען הרשאות…" else "נדרשת הרשאה"
                         progressPercent == 100 -> "הקורס הושלם"
                         progressPercent > 0 -> "המשך ללמוד"
                         else -> "התחלת הקורס"
@@ -340,13 +363,17 @@ private fun CourseCard(course: Course, completed: Set<String>, onClick: () -> Un
                 )
                 Box(
                     Modifier.size(42.dp).clip(CircleShape)
-                        .background(if (progressPercent > 0) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
+                        .background(if (accessGranted && progressPercent > 0) StudyBlue else MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (progressPercent == 100) Icons.Rounded.CheckCircle else Icons.Rounded.ChevronLeft,
+                        when {
+                            !accessGranted -> Icons.Rounded.Lock
+                            progressPercent == 100 -> Icons.Rounded.CheckCircle
+                            else -> Icons.Rounded.ChevronLeft
+                        },
                         null,
-                        tint = if (progressPercent > 0) Color.White else MaterialTheme.colorScheme.onSurface
+                        tint = if (accessGranted && progressPercent > 0) Color.White else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }

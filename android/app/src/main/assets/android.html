@@ -7,8 +7,21 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' blob: https://studyzone-cpav.onrender.com;" />
     <title>StudyZone Course</title>
     <style>html,body,#root{height:100%;margin:0;overflow:hidden;background:#f8fafc}html.dark,html.dark body,html.dark #root{background:#020617}</style>
-    <script type="module" crossorigin src="/app/assets/e.CTYcQwqj.js"></script>
-    <link rel="stylesheet" crossorigin href="/app/assets/a.Db6jlLs0.css">
+    <script>
+      (() => {
+        const requested = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light';
+        document.documentElement.classList.add(requested);
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', requested === 'dark' ? '#020617' : '#f8fafc');
+        try {
+          localStorage.setItem('theme', requested);
+          const key = 'StudyMaster_user_settings_v1';
+          const current = JSON.parse(localStorage.getItem(key) || '{}');
+          localStorage.setItem(key, JSON.stringify({ ...current, theme: requested, themeMode: requested }));
+        } catch (_) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/app/assets/e.B3PKpPBA.js"></script>
+    <link rel="stylesheet" crossorigin href="/app/assets/a.B0BEVcYV.css">
   </head>
   <body>
     <div id="root"></div>
