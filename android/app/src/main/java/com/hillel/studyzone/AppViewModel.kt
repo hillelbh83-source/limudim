@@ -720,6 +720,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 attachments = attachments,
                 course = snapshot.selectedCourse,
                 lesson = snapshot.lesson,
+                user = snapshot.user,
+                pythiMemories = snapshot.pythiMemories,
+                completedSections = snapshot.completedSections,
+                bookmarkedSections = snapshot.bookmarkedSections,
                 showActionSuggestions = snapshot.settings.showActionSuggestions,
                 onDelta = { fullText ->
                     if (generation == chatGeneration) pendingChatText.set(fullText)
@@ -814,6 +818,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 chatMessages = emptyList(),
                 chatAttachments = emptyList(),
                 chatSuggestions = listOf("תסבירי לי בפשטות", "צרי לי בוחן", "הכיני לי כרטיסיות")
+            )
+        }
+    }
+
+    fun askPythiAboutSelection(selectedText: String) {
+        val excerpt = selectedText.trim().replace(Regex("\\s+"), " ").take(1_500)
+        if (excerpt.isBlank()) return
+        mutableState.update {
+            it.copy(
+                chatOpen = true,
+                chatExpanded = false,
+                chatInput = "הסבירי לי את הקטע הבא מהשיעור:\n״$excerpt״"
             )
         }
     }

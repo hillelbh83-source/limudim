@@ -88,6 +88,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -1147,8 +1148,19 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("הגדרות", style = MaterialTheme.typography.headlineLarge)
-            Text("כל הגדרות הממשק, הלמידה, פיתי והחשבון", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(34.dp), selected = true) {
+                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(54.dp).clip(RoundedCornerShape(18.dp)).background(StudyBlue),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Rounded.Settings, null, tint = Color.White, modifier = Modifier.size(27.dp)) }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text("הגדרות", style = MaterialTheme.typography.headlineLarge)
+                        Text("המראה והלמידה שלך, במקום אחד", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
         item {
             SettingsGroup("מראה וקריאות", Icons.Rounded.Palette) {
@@ -1289,14 +1301,17 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsGroup(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
-    GlassSurface(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = StudyBlue)
-                Spacer(Modifier.width(10.dp))
-                Text(title, style = MaterialTheme.typography.titleLarge)
+    GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Row(Modifier.padding(horizontal = 7.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(StudyBlue.copy(alpha = .14f)),
+                    contentAlignment = Alignment.Center
+                ) { Icon(icon, null, tint = StudyBlue, modifier = Modifier.size(21.dp)) }
+                Spacer(Modifier.width(11.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(7.dp))
             content()
         }
     }
@@ -1304,12 +1319,25 @@ private fun SettingsGroup(title: String, icon: ImageVector, content: @Composable
 
 @Composable
 private fun ToggleSetting(title: String, subtitle: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).clickable { onChecked(!checked) }
+            .padding(horizontal = 8.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
-        Switch(checked = checked, onCheckedChange = onChecked)
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = StudyBlue,
+                uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        )
     }
 }
 

@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -118,6 +119,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
@@ -387,7 +390,8 @@ fun LessonScreen(
     onBookmark: () -> Unit,
     onCompleted: () -> Unit,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onAskSelection: (String) -> Unit
 ) {
     val lesson = state.lesson
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -424,7 +428,14 @@ fun LessonScreen(
 
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     if (lesson.content.isBlank()) EmptyLessonContent()
-                    else LessonMathView(lesson.content, Modifier.fillMaxSize())
+                    else LessonMathView(
+                        content = lesson.content,
+                        selectionEnabled = state.settings.enableAskPopover,
+                        clearSelectionAfterAction = state.settings.clearSelectionAfterPopover,
+                        selectionHighlight = state.settings.selectionHighlight,
+                        onAskSelection = onAskSelection,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 GlassSurface(
@@ -542,21 +553,52 @@ fun ChatOverlay(
             Unit
         }
     }
+    val sheetFraction by animateFloatAsState(
+        targetValue = if (state.chatExpanded) .94f else .64f,
+        animationSpec = tween(durationMillis = if (state.settings.reduceMotion) 0 else 230, easing = FastOutSlowInEasing),
+        label = "pythiSheetHeight"
+    )
+    var dragDistance by remember { mutableFloatStateOf(0f) }
     AnimatedVisibility(
         visible = state.chatOpen,
         enter = fadeIn() + slideInVertically(initialOffsetY = { it / 8 }),
         exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 8 })
     ) {
-        Column(
-            modifier
-                .fillMaxSize()
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+          Column(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(sheetFraction)
+                .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .background(MaterialTheme.colorScheme.background)
-                .statusBarsPadding()
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .65f), RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
                 .navigationBarsPadding()
                 .imePadding()
         ) {
+            Box(
+                Modifier.fillMaxWidth().height(22.dp).pointerInput(state.chatExpanded) {
+                    detectVerticalDragGestures(
+                        onDragStart = { dragDistance = 0f },
+                        onVerticalDrag = { _, amount -> dragDistance += amount },
+                        onDragEnd = {
+                            when {
+                                dragDistance < -55f -> onExpanded(true)
+                                dragDistance > 55f -> onExpanded(false)
+                            }
+                            dragDistance = 0f
+                        },
+                        onDragCancel = { dragDistance = 0f }
+                    )
+                },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier.width(42.dp).height(5.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f))
+                )
+            }
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(StudyBlue), contentAlignment = Alignment.Center) {
@@ -678,6 +720,7 @@ fun ChatOverlay(
                 onStop = onStop,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
             )
+          }
         }
     }
 }

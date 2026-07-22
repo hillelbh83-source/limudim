@@ -6,6 +6,8 @@ import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.MotionEvent
 import android.webkit.CookieManager
@@ -13,6 +15,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.JavascriptInterface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -35,15 +38,25 @@ import org.json.JSONObject
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LessonMathView(content: String, modifier: Modifier = Modifier) {
+fun LessonMathView(
+    content: String,
+    selectionEnabled: Boolean = true,
+    clearSelectionAfterAction: Boolean = false,
+    selectionHighlight: String = "default",
+    onAskSelection: (String) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val palette = currentWebPalette()
     val bodySize = MaterialTheme.typography.bodyLarge.fontSize.value.coerceIn(15f, 24f)
-    val shell = remember(palette, bodySize) {
+    val shell = remember(palette, bodySize, selectionEnabled, clearSelectionAfterAction, selectionHighlight) {
         lessonShell(
             palette = palette,
             bodySize = bodySize,
-            katexSource = KatexAsset.get(context)
+            katexSource = KatexAsset.get(context),
+            selectionEnabled = selectionEnabled,
+            clearSelectionAfterAction = clearSelectionAfterAction,
+            selectionColor = selectionColor(selectionHighlight)
         )
     }
 
@@ -51,6 +64,7 @@ fun LessonMathView(content: String, modifier: Modifier = Modifier) {
         val webView = remember {
             LocalRendererWebView(context).apply {
                 configureLocalRenderer(palette.background)
+                addJavascriptInterface(SelectionBridge(onAskSelection), "AndroidSelection")
                 webViewClient = rendererClient()
                 loadDataWithBaseURL(LOCAL_BASE_URL, shell, "text/html", "UTF-8", null)
             }
@@ -61,7 +75,10 @@ fun LessonMathView(content: String, modifier: Modifier = Modifier) {
             update = { it.submit("lesson", JSONObject.quote(content)) }
         )
         DisposableEffect(webView) {
-            onDispose { webView.disposeSafely() }
+            onDispose {
+                webView.removeJavascriptInterface("AndroidSelection")
+                webView.disposeSafely()
+            }
         }
     }
 }
@@ -281,7 +298,14 @@ private fun WebView.disposeSafely() {
     destroy()
 }
 
-private fun lessonShell(palette: WebPalette, bodySize: Float, katexSource: String) = """
+private fun lessonShell(
+    palette: WebPalette,
+    bodySize: Float,
+    katexSource: String,
+    selectionEnabled: Boolean,
+    clearSelectionAfterAction: Boolean,
+    selectionColor: String
+) = """
     <!doctype html>
     <html dir="rtl" lang="he">
     <head>
@@ -319,18 +343,64 @@ private fun lessonShell(palette: WebPalette, bodySize: Float, katexSource: Strin
         .katex-display { margin:0; }
         .katex-mathml { position:absolute; }
         .math-error { direction:ltr; color:${palette.error}; font-family:ui-monospace,monospace; }
-        ::selection { background:#1473ff42; }
+        ::selection { background:$selectionColor; }
+        #selection-popover { position:fixed; z-index:9999; display:none; direction:rtl; transform:translate(-50%,-100%);
+          appearance:none; border:1px solid #ffffff30; border-radius:999px; padding:10px 15px; color:white;
+          background:#111827ee; box-shadow:0 12px 32px #00000045; font:700 13px/1 -apple-system,"Segoe UI",Arial,sans-serif; }
       </style>
       <script>$katexSource</script>
       <script>${sharedRendererScript()}
         window.renderLesson = function(raw) {
           document.getElementById('lesson').innerHTML = renderMarkdown(raw || '');
         };
+        document.addEventListener('DOMContentLoaded', function() {
+          const popover = document.getElementById('selection-popover');
+          let selectedText = '';
+          function updateSelectionPopover() {
+            if (!${selectionEnabled}) { popover.style.display = 'none'; return; }
+            window.setTimeout(function() {
+              const selection = window.getSelection();
+              const text = selection ? selection.toString().trim() : '';
+              if (!text || !selection.rangeCount) { popover.style.display = 'none'; return; }
+              const rect = selection.getRangeAt(0).getBoundingClientRect();
+              selectedText = text;
+              popover.style.left = Math.max(72, Math.min(window.innerWidth - 72, rect.left + rect.width / 2)) + 'px';
+              popover.style.top = Math.max(54, rect.top - 8) + 'px';
+              popover.style.display = 'block';
+            }, 30);
+          }
+          document.addEventListener('selectionchange', updateSelectionPopover);
+          document.addEventListener('touchend', updateSelectionPopover);
+          popover.addEventListener('click', function() {
+            if (selectedText && window.AndroidSelection) AndroidSelection.ask(selectedText);
+            popover.style.display = 'none';
+            if (${clearSelectionAfterAction}) window.getSelection().removeAllRanges();
+          });
+        });
       </script>
     </head>
-    <body><article id="lesson" aria-live="polite"></article></body>
+    <body><button id="selection-popover" type="button">שאלו את פיתי ✨</button><article id="lesson" aria-live="polite"></article></body>
     </html>
 """.trimIndent()
+
+private class SelectionBridge(private val onAsk: (String) -> Unit) {
+    @JavascriptInterface
+    fun ask(text: String) {
+        Handler(Looper.getMainLooper()).post { onAsk(text) }
+    }
+}
+
+private fun selectionColor(id: String): String = when (id) {
+    "sunset" -> "#fb923c66"
+    "mint" -> "#34d39966"
+    "sky" -> "#38bdf866"
+    "butter" -> "#facc1566"
+    "lavender" -> "#a78bfa66"
+    "teal" -> "#2dd4bf66"
+    "peach" -> "#fb718566"
+    "rose" -> "#f472b666"
+    else -> "#1473ff52"
+}
 
 private fun chatShell(palette: WebPalette, bodySize: Float, katexSource: String) = """
     <!doctype html>

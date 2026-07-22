@@ -573,6 +573,10 @@ class StudyZoneApi(context: Context) {
         attachments: List<ChatAttachment>,
         course: Course?,
         lesson: Lesson?,
+        user: User?,
+        pythiMemories: Map<String, String>,
+        completedSections: Set<String>,
+        bookmarkedSections: Set<String>,
         showActionSuggestions: Boolean,
         onDelta: (String) -> Unit,
         onDone: (List<ToolCall>) -> Unit,
@@ -609,9 +613,53 @@ class StudyZoneApi(context: Context) {
                 JSONObject()
                     .put("courseName", course?.title ?: "StudyZone")
                     .put("currentContext", lesson?.let { "${it.title} (${it.sectionId})" } ?: "מסך הקורסים")
-                    .put("courseStructure", course?.chapters?.joinToString("\n") { chapter ->
-                        "${chapter.title}: ${chapter.sections.joinToString { it.title }}"
-                    }.orEmpty())
+                    .put(
+                        "userMemories",
+                        buildString {
+                            if (user != null) {
+                                appendLine("שם המשתמש: ${user.displayName}")
+                                appendLine("המשתמש מחובר לחשבון: ${user.email}")
+                            } else appendLine("המשתמש אינו מחובר.")
+                            if (pythiMemories.isNotEmpty()) {
+                                appendLine("זיכרונות שפיתי שמרה:")
+                                pythiMemories.entries.take(50).forEach { (key, value) -> appendLine("- $key: $value") }
+                            }
+                            appendLine("התקדמות: ${completedSections.size} שיעורים הושלמו, ${bookmarkedSections.size} פריטים נשמרו.")
+                        }.take(8_000)
+                    )
+                    .put(
+                        "savedItemsString",
+                        if (bookmarkedSections.isEmpty()) "התיבה ריקה כרגע."
+                        else bookmarkedSections.take(100).joinToString("\n") { "- $it" }
+                    )
+                    .put(
+                        "userProfile",
+                        JSONObject()
+                            .put("displayName", user?.displayName.orEmpty())
+                            .put("email", user?.email.orEmpty())
+                            .put("isSignedIn", user != null)
+                    )
+                    .put("pythiMemories", JSONObject(pythiMemories))
+                    .put(
+                        "learningProgress",
+                        JSONObject()
+                            .put("completedSections", JSONArray(completedSections.take(200)))
+                            .put("bookmarkedSections", JSONArray(bookmarkedSections.take(100)))
+                            .put("completedCount", completedSections.size)
+                            .put("bookmarkedCount", bookmarkedSections.size)
+                    )
+                    .put("courseStructure", JSONArray().apply {
+                        course?.chapters?.forEach { chapter ->
+                            put(JSONObject()
+                                .put("id", chapter.id)
+                                .put("title", chapter.title)
+                                .put("sections", JSONArray().apply {
+                                    chapter.sections.forEach { section ->
+                                        put(JSONObject().put("id", section.id).put("title", section.title))
+                                    }
+                                }))
+                        }
+                    })
             )
         if (lesson != null) {
             payload.put(

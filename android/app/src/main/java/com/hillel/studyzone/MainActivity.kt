@@ -56,6 +56,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.hillel.studyzone.model.RootTab
 import com.hillel.studyzone.model.ThemeMode
 import com.hillel.studyzone.ui.screens.AdminScreen
@@ -93,6 +96,18 @@ class MainActivity : ComponentActivity() {
         if (text.isNotBlank()) {
             viewModel.setChatInput(text)
         }
+    }
+    private val legacyGoogleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        runCatching {
+            GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(ApiException::class.java)
+                .idToken
+                .orEmpty()
+                .ifBlank { error("Google לא החזירה אסימון התחברות") }
+        }.onSuccess(viewModel::loginWithGoogle)
+            .onFailure { error ->
+                viewModel.showMessage("ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "בדקו את הגדרת OAuth של האפליקציה" }}")
+            }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -157,11 +172,12 @@ class MainActivity : ComponentActivity() {
                 GoogleIdTokenCredential.createFrom(credential.data).idToken
             }.onSuccess(viewModel::loginWithGoogle)
                 .onFailure { error ->
+                    if (error is GetCredentialCancellationException || error is NoCredentialException) {
+                        launchLegacyGoogleSignIn()
+                        return@onFailure
+                    }
                     viewModel.showMessage(
                         when {
-                            error is GetCredentialCancellationException ->
-                                "Google לא הצליחה לפתוח את בחירת החשבון. בדקו ש-Google Play Services מעודכן ונסו שוב"
-                            error is NoCredentialException -> "לא נמצא חשבון Google זמין במכשיר"
                             error.javaClass.simpleName.contains("Configuration", ignoreCase = true) ->
                                 "Google עדיין לא מזהה את חתימת האפליקציה. יש לעדכן את SHA-1 ב-Google Auth Platform"
                             else -> "ההתחברות עם Google נכשלה: ${error.message.orEmpty().ifBlank { "שגיאה לא צפויה" }}"
@@ -169,6 +185,14 @@ class MainActivity : ComponentActivity() {
                     )
                 }
         }
+    }
+
+    private fun launchLegacyGoogleSignIn() {
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestIdToken(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+            .build()
+        legacyGoogleLauncher.launch(GoogleSignIn.getClient(this, options).signInIntent)
     }
 
     fun launchChatAttachmentPicker() {
@@ -289,7 +313,8 @@ private fun StudyZoneRoot(viewModel: AppViewModel, state: com.hillel.studyzone.m
                 onBookmark = viewModel::toggleBookmark,
                 onCompleted = viewModel::toggleCompleted,
                 onPrevious = { viewModel.openAdjacent(state.lesson?.previousSectionId) },
-                onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) }
+                onNext = { viewModel.openAdjacent(state.lesson?.nextSectionId) },
+                onAskSelection = viewModel::askPythiAboutSelection
             )
             selectedCourse != null -> CourseDetailScreen(
                 state = state,
